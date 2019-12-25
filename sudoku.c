@@ -9,6 +9,8 @@
 
 char grid[VALUES][VALUES]; // Don't need it to be int as no processing done
 int possible[VALUES][VALUES][VALUES]; // Stores all possibilities (Space n^3)!
+int possibleCount[VALUES][VALUES]; // Trades off space in favour of time
+int cellsLeft = 0; // To keep track of when solved
 char valid[] = {'-', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 
 // Gets the value from a token
@@ -121,11 +123,101 @@ void pre_process() {
         // Check if already full, is in the row, column or subGrid
         if (grid[row][col] == '-' && curRow[val] == 0 && allCols[col][val] == 0
         && subGrids[row/SUB_SIZE][col/SUB_SIZE][val] == 0) {
+          if (possibleCount[row][col] == 0) {
+            cellsLeft += 1;
+          }
           possible[row][col][val] = 1; // Mark as possible if none match
+          possibleCount[row][col] += 1;
         }
       }
     }
   }
+}
+
+// Gets the next pair of row and column where there is only one possibility
+int* find_next() {
+  for (int row = 0; row < VALUES; row++) {
+    for (int col = 0; col < VALUES; col++) {
+      if (possibleCount[row][col] == 1) {
+        int* pair = calloc(0, 2*sizeof(int));
+        pair[0] = row;
+        pair[1] = col;
+        return pair;
+      }
+    }
+  }
+  return NULL;
+}
+
+// Assumes there is only one value in the bitmap and retrieves it
+int get_possible_value(int* pair) {
+  for (int i = 0; i < VALUES; i++) {
+    if (possible[pair[0]][pair[1]][i] == 1) {
+      return i+1;
+    }
+  }
+  return -1;
+}
+
+// Process the next iteration of the loop
+int process_next() {
+  if (cellsLeft == 0) {
+    return 1;
+  }
+  // Find cell with only one left
+  int* pair = find_next();
+  if (pair == NULL) { // If not found, report
+    printf("Didn't find next pair. Cells left: %i", cellsLeft);
+    return 1;
+  }
+  int value = get_possible_value(pair);
+  if (value == -1) {
+    printf("Empty cell used for get_possible_value");
+    return 1;
+  }
+  grid[pair[0]][pair[1]] = valid[value];
+  possible[pair[0]][pair[1]][value-1] = 0;
+  possibleCount[pair[0]][pair[1]] -= 1;
+  cellsLeft -= 1;
+  // Remove from row
+  for (int col = 0; col < VALUES; col++) {
+    if (pair[1] == col) {
+      continue;
+    }
+    // Only if the value is in its possibilities
+    if (possible[pair[0]][col][value-1] == 1) {
+      possible[pair[0]][col][value-1] = 0;
+      possibleCount[pair[0]][col] -= 1;
+    }
+  }
+  // Remove from col
+  for (int row = 0; row < VALUES; row++) {
+    if (pair[0] == row) {
+      continue;
+    }
+    // Only if the value is in its possibilities
+    if (possible[row][pair[1]][value-1] == 1) {
+      possible[row][pair[1]][value-1] = 0;
+      possibleCount[row][pair[1]] -= 1;
+    }
+  }
+  // Remove from subGrid
+  int subRow = pair[0]/SUB_SIZE; // The subGrid section it is in
+  int subCol = pair[1]/SUB_SIZE;
+  for (int i = 0; i < VALUES; i++) {
+    if ((i%SUB_SIZE) + (subRow*SUB_SIZE) == pair[0] &&
+        (i/SUB_SIZE) + (subCol*SUB_SIZE) == pair[1]) {
+      continue;
+    }
+    if (possible[(subRow*SUB_SIZE)+(i/SUB_SIZE)][(subCol*SUB_SIZE)+(i%SUB_SIZE)][value-1] == 1) {
+      possible[(subRow*SUB_SIZE)+(i/SUB_SIZE)][(subCol*SUB_SIZE)+(i%SUB_SIZE)][value-1] = 0;
+      possibleCount[(subRow*SUB_SIZE)+(i/SUB_SIZE)][(subCol*SUB_SIZE)+(i%SUB_SIZE)] -= 1;
+    }
+  }
+  // Show affected
+  //printf("Added %c at (%i, %i)\n", valid[value], pair[0], pair[1]);
+  free(pair);
+  return 0;
 }
 
 // Prints the grid's current contents
@@ -189,11 +281,27 @@ void print_possible() {
     printf("\n");
   }
   printf("+_______________________+\n"); // Bottom
+
+  printf("\n+_______________________+\n"); // Top
+  for (int row = 0; row < VALUES; row++) {
+    if (row % 3 == 0 && row != 0) {
+      printf("-------------------------\n"); // Row sectioner
+    }
+    printf("| "); // Left
+    for (int col = 0; col < VALUES; col++) {
+      printf("%i ", possibleCount[row][col]);
+      if ((col+1) % 3 == 0) {
+        printf("| "); // Col sectioner and Right
+      }
+    }
+    printf("\n");
+  }
+  printf("+_______________________+\n"); // Bottom
 }
 
 int main() {
   // Load up contents of the file into grid
-  if (read_csv("csv/easy.csv") != 0) {
+  if (read_csv("csv/hard.csv") != 0) {
     return 1;
   }
   // Show the contents of the file
@@ -201,8 +309,13 @@ int main() {
   print_grid();
   // Calculate solution
   pre_process();
-  print_possible();
+  //print_possible();
+  while (process_next() != 1) {
+    //print_grid();
+    //print_possible();
+  }
+  //print_possible();
   // Display solution
-  // printf("Output:\n");
-  // print_grid();
+  printf("Output:\n");
+  print_grid();
 }
