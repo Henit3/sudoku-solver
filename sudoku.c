@@ -1,11 +1,9 @@
-// TODO: Add command line argument to provide missing value where missing
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
-#define READ_BUF_SIZE 500
+#define ROW_BUF_SIZE 500
 #define PAD_SIZE 15
 
 char*** grid; // Don't need it to be int as no processing done
@@ -15,8 +13,8 @@ char** valid;
 int VALUES, SUB_SIZE;
 
 // Processes the command line arguments provided
-int process_arguments(int argc, char* argv[], int* flags,
-                      char** inCsv, char** outCsv) {
+int process_arguments(int argc, char* argv[], int* flag,
+                      char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
     fprintf(stderr, "Not enough arguments\n");
@@ -26,15 +24,14 @@ int process_arguments(int argc, char* argv[], int* flags,
   int inFound = 0;
   for (int i = 1; i < argc; i++) {
     if (strcmp("-l", argv[i]) == 0) { // List flag
-      if (*flags % 2 == 0) { // Check if already specified
-        *flags += 1;
+      if (flag == 0) { // Check if already specified
+        *flag = 1;
       } else {
         fprintf(stderr, "Duplicate -l flag found\n");
         return 1;
       }
     } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
-      if ((*flags / 2) % 2 == 0) { // Check if already specified
-        *flags += 2;
+      if (*outCsv == NULL) { // Check if already specified
         if (++i != argc && argv[i][0] != '-') { // Check next argument
           *outCsv = argv[i];
         } else {
@@ -43,6 +40,18 @@ int process_arguments(int argc, char* argv[], int* flags,
         }
       } else {
         fprintf(stderr, "Duplicate -o flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-m", argv[i]) == 0) { // Mising flag + arg
+      if (*missing == NULL) { // Check if already specified
+        if (++i != argc && argv[i][0] != '-') { // Check next argument
+          *missing = argv[i];
+        } else {
+          fprintf(stderr, "Missing argument for -m not specified\n");
+          return 1;
+        }
+      } else {
+        fprintf(stderr, "Duplicate -m flag found\n");
         return 1;
       }
     } else { // Input path
@@ -58,7 +67,8 @@ int process_arguments(int argc, char* argv[], int* flags,
   return 0;
 }
 
-int initialize_globals(char buffer[READ_BUF_SIZE]) {
+// Allocates and initializes the global variables
+int initialize_globals(char buffer[ROW_BUF_SIZE]) {
   // Gets number of values
   int values = 1;
   for (int i = 0; buffer[i]; i++) {
@@ -96,6 +106,7 @@ int initialize_globals(char buffer[READ_BUF_SIZE]) {
   return 0;
 }
 
+// Frees the dynamically allocated global variables
 void free_globals() {
   // No need to free cells, since they reference those in valid
   for (int i = 0; i < VALUES; i++) {
@@ -122,6 +133,7 @@ void free_globals() {
   free(valid);
 }
 
+// Add the token to the valid array if not full
 int addToValid(int* tokenCount, char* token) {
   int new = 1;
   for (int i = 0; i < *tokenCount; i++) {
@@ -140,6 +152,7 @@ int addToValid(int* tokenCount, char* token) {
   return 0;
 }
 
+// Sanitize, and set the grid to reference a valid token
 int process_token(int* tokenCount, char* token, int row, int col) {
   if (strchr(token, '\n') != NULL) { // Sanitize token
     *strchr(token, '\n') = '\0';
@@ -161,16 +174,16 @@ int process_token(int* tokenCount, char* token, int row, int col) {
 }
 
 // Reads from a csv file and loads into the grid
-int read_csv(const char* fileName) {
+int read_csv(const char* fileName, char* missing) {
   FILE* input = fopen(fileName, "r");
   if (input == NULL) {
     fprintf(stderr, "CSV file could not be opened for reading\n");
     return -1;
   }
-  char buffer[READ_BUF_SIZE];
+  char buffer[ROW_BUF_SIZE];
   int row = 0;
 
-  if (initialize_globals(fgets(buffer, READ_BUF_SIZE, input)) != 0) {
+  if (initialize_globals(fgets(buffer, ROW_BUF_SIZE, input)) != 0) {
     return -1;
   }
   int tokenCount = 1;
@@ -195,11 +208,20 @@ int read_csv(const char* fileName) {
     }
     row++;
     memset(buffer, 0, sizeof(buffer));
-  } while (fgets(buffer, READ_BUF_SIZE, input) && row < VALUES);
+  } while (fgets(buffer, ROW_BUF_SIZE, input) && row < VALUES);
   fclose(input);
   if (row < VALUES) { // If fewer rows than expected detected
     fprintf(stderr, "Too few rows in grid: Expected %i, not %i\n", VALUES, row);
     return 1;
+  }
+
+  if (tokenCount <= VALUES) { // If not enough values
+    if (missing != NULL) {
+      valid[VALUES] = strdup(missing);
+    } else {
+      fprintf(stderr, "Not enough different values so X substituted\n");
+      valid[VALUES] = strdup("X");
+    }
   }
   return 0;
 }
@@ -212,7 +234,7 @@ void get_columns_bitmap(int array[VALUES][VALUES]) {
         continue;
       }
       for (int val = 0; val < VALUES; val++) {
-        if (strcmp(grid[row][col], valid[val+1]) == 0) {
+        if (strcmp(grid[row][col], valid[val + 1]) == 0) {
           array[col][val] = 1;
         }
       }
@@ -226,12 +248,13 @@ void get_subgrids_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
     for (int row = 0; row < SUB_SIZE; row++) {
       for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of subGrid
         for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
-          if (strcmp(grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol], "-") == 0) {
+          int curRow = row * SUB_SIZE + subRow;
+          int curCol = col * SUB_SIZE + subCol;
+          if (strcmp(grid[curRow][curCol], "-") == 0) {
             continue;
           } // If not empty, find and mark value
           for (int val = 0; val < VALUES; val++) {
-            if (strcmp(grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol],
-                valid[val+1]) == 0) {
+            if (strcmp(grid[curRow][curCol], valid[val + 1]) == 0) {
               array[row][col][val] = 1;
             }
           }
@@ -248,7 +271,7 @@ void get_row_bitmap(int row, int array[VALUES]) {
       continue;
     }
     for (int val = 0; val < VALUES; val++) {
-      if (strcmp(grid[row][col], valid[val+1]) == 0) {
+      if (strcmp(grid[row][col], valid[val + 1]) == 0) {
         array[val] = 1;
       }
     }
@@ -307,7 +330,7 @@ int* find_next() {
 int get_possible_value(int* pair) {
   for (int i = 0; i < VALUES; i++) {
     if (possible[pair[0]][pair[1]][i] == 1) {
-      return i+1;
+      return i + 1;
     }
   }
   return -1;
@@ -365,12 +388,12 @@ int process_next(int* cellsLeft, int listSteps) {
   }
   int* pair = find_next(); // Find cell with only one left
   if (pair == NULL) { // If not found, report
-    fprintf(stderr, "Didn't find next pair. Cells left: %i", *cellsLeft);
+    fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
     return 1;
   }
   int value = get_possible_value(pair);
   if (value == -1) {
-    fprintf(stderr, "Empty cell processed");
+    fprintf(stderr, "Empty cell processed\n");
     return 1;
   }
 
@@ -398,10 +421,10 @@ void print_array(int* array, int len, int isPadded) {
   for (int i = 0; i < len; i++) {
     if (array[i] == 1) {
       if (count == 0) {
-        printf("%i", i+1);
+        printf("%i", i + 1);
         count += 1;
       } else {
-        printf(" %i", i+1);
+        printf(" %i", i + 1);
         count += 2;
       }
     }
@@ -426,7 +449,7 @@ void print_grid() {
     printf("| "); // Left
     for (int col = 0; col < VALUES; col++) {
       printf("%s ", grid[row][col]);
-      if ((col+1) % SUB_SIZE == 0) {
+      if ((col + 1) % SUB_SIZE == 0) {
         printf("| "); // Col sectioner and Right
       }
     }
@@ -437,7 +460,7 @@ void print_grid() {
 
 // Writes the contents of the grid to a file in csv format
 void write_to_file(FILE* output) {
-  char buffer[READ_BUF_SIZE];
+  char buffer[ROW_BUF_SIZE];
   for (int row = 0; row < VALUES; row++) {
     int bufPos = 0;
     memset(buffer, '\0', sizeof(buffer));
@@ -448,7 +471,7 @@ void write_to_file(FILE* output) {
       buffer[bufPos] = ',';
       bufPos += 1;
     }
-    buffer[bufPos-1] = '\0';
+    buffer[bufPos - 1] = '\0';
     fprintf(output, "%s\n", buffer);
   }
 }
@@ -479,17 +502,19 @@ int main(int argc, char* argv[]) {
   // Read and store arguments in easy to use manner
   char* inCsv = NULL;
   char* outCsv = NULL;
-  int flags = 0; // flag structure -> +1 for -l, +2 for -o
-  if (process_arguments(argc, argv, &flags, &inCsv, &outCsv) != 0) {
-    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-o <new_csv_name>] <csv_path>"
-                    "\nOptions:\n"
+  char* missing = NULL;
+  int listFlag = 0; // flag structure -> +1 for -l, +2 for -o, +4 for -m
+  if (process_arguments(argc, argv, &listFlag, &inCsv, &outCsv, &missing) != 0) {
+    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-o <new_csv_name>] "
+                    "[-m <missing_arg>] <csv_path>\nOptions:\n"
                     " -l lists steps in solving\n"
-                    " -o exports solved grid to a new csv\n");
+                    " -o exports solved grid to a new csv\n"
+                    " -m provide missing argument if not in the grid");
     return 1;
   }
 
   // Load up contents of the file into grid
-  switch (read_csv(inCsv)) {
+  switch (read_csv(inCsv, missing)) {
     case 1:
       free_globals();
     case -1:
@@ -504,12 +529,12 @@ int main(int argc, char* argv[]) {
   // Calculate the result
   int cellsLeft = 0;
   pre_process(&cellsLeft);
-  while (process_next(&cellsLeft, flags % 2) != 1) {}
+  while (process_next(&cellsLeft, listFlag) != 1) {}
 
   // Display solution
   printf("\nOutput:");
   print_grid();
-  if ((flags / 2) % 2 == 1) { // If output flag set, export
+  if (outCsv != NULL) { // If output set, export
     if (export_grid(outCsv) != 0) {
       free_globals();
       return 1;
