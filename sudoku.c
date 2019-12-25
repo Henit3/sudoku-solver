@@ -1,5 +1,4 @@
 // TODO: Allow for dynamically sized sudoku grids of n^2
-// TODO: Allow command arguments to increase usability
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +12,50 @@ char grid[VALUES][VALUES]; // Don't need it to be int as no processing done
 int possible[VALUES][VALUES][VALUES]; // Stores all possibilities (Space n^3)!
 int possibleCount[VALUES][VALUES]; // Trades off space in favour of time
 char valid[] = {'-', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+
+// Processes the command line arguments provided
+int process_arguments(int argc, char* argv[], int* flags,
+                      char** inCsv, char** outCsv) {
+  // Check if enough arguments provided
+  if (argc < 2) {
+    fprintf(stderr, "Not enough arguments\n");
+    return 1;
+  }
+  // Go through all arguments (not first since that's the command)
+  int inFound = 0;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp("-l", argv[i]) == 0) { // List flag
+      if (*flags % 2 == 0) { // Check if already specified
+        *flags += 1;
+      } else {
+        fprintf(stderr, "Duplicate -l flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
+      if ((*flags / 2) % 2 == 0) { // Check if already specified
+        *flags += 2;
+        if (++i != argc && argv[i][0] != '-') { // Check next argument
+          *outCsv = argv[i];
+        } else {
+          fprintf(stderr, "Output file path for -o not specified\n");
+          return 1;
+        }
+      } else {
+        fprintf(stderr, "Duplicate -o flag found\n");
+        return 1;
+      }
+    } else { // Input path
+      if (inFound == 0) {  // Check if already specified
+        *inCsv = argv[i];
+        inFound++;
+      } else {
+        fprintf(stderr, "Unexpected argument found\n");
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
 
 // Gets the value from a token
 char get_token_value(char* token) {
@@ -214,7 +257,7 @@ void remove_value_from_subgrid(int* pair, int value) {
 }
 
 // Process the next iteration of the loop
-int process_next(int* cellsLeft) {
+int process_next(int* cellsLeft, int listSteps) {
   if (*cellsLeft == 0) {
     return 1;
   }
@@ -239,7 +282,9 @@ int process_next(int* cellsLeft) {
   remove_value_from_subgrid(pair, value);
 
   // Show affected
-  //printf("Added %c at (%i, %i)\n", valid[value], pair[0], pair[1]);
+  if (listSteps == 1) {
+    printf("Added %c at (%i, %i)\n", valid[value], pair[0], pair[1]);
+  }
   free(pair);
   return 0;
 }
@@ -269,115 +314,95 @@ void print_array(int* array, int len, int isPadded) {
   }
 }
 
-// Prints a grid based output which varies depending on the mode passed to it
-// {0 -> Char, 1 -> Array, 2 -> Int}
-void print_grid(int mode) {
-  printf("_________________________\n"); // Top
+// Prints the current state of the grid in a formatted output
+void print_grid() {
+  printf("\n_________________________\n"); // Top
   for (int row = 0; row < VALUES; row++) {
     if (row % 3 == 0 && row != 0) {
       printf("-------------------------\n"); // Row sectioner
     }
     printf("| "); // Left
     for (int col = 0; col < VALUES; col++) {
-      switch (mode) {
-        case 0:
-          printf("%c ", grid[row][col]);
-          break;
-        case 1:
-          print_array(possible[row][col], VALUES, 1);
-          break;
-        case 2:
-          printf("%i ", possibleCount[row][col]);
-          break;
-      }
+      printf("%c ", grid[row][col]);
       if ((col+1) % 3 == 0) {
         printf("| "); // Col sectioner and Right
       }
     }
     printf("\n");
   }
-  printf("_________________________\n"); // Bottom
+  printf("_________________________\n\n"); // Bottom
 }
 
-// Prints the grid's possible contents
-void print_possible() {
-  print_grid(1); // Print all possibilities in each cell
-  print_grid(2); // Print the number of possibilities in each cell
+// Writes the contents of the grid to a file in csv format
+void write_to_file(FILE* output) {
+  char buffer[2 * VALUES];
+  for (int row = 0; row < VALUES; row++) {
+    memset(buffer, '\0', sizeof(buffer));
+    for (int col = 0; col < VALUES; col++) {
+      buffer[2 * col] = grid[row][col];
+      buffer[2 * col + 1] = ',';
+    }
+    buffer[2 * VALUES - 1] = '\0';
+    fprintf(output, "%s\n", buffer);
+  }
 }
 
-// Processes the command line arguments provided
-int process_arguments(int argc, char* argv[], int* flags,
-                      char** in_csv, char** out_csv) {
-  // Check if enough arguments provided
-  if (argc < 2) {
-    fprintf(stderr, "Not enough arguments\n");
+// Exports the solved grid as a csv file
+int export_grid(char* outCsv) {
+  // Append .csv file extension to the fileName provided if not already present
+  char* outCsvFull = calloc(strlen(outCsv) + 4, sizeof(char));
+  strcpy(outCsvFull, outCsv);
+  if (strstr(outCsvFull, ".csv") !=
+      &outCsvFull[strlen(outCsvFull) - 4]) {
+      strcat(outCsvFull, ".csv");
+  }
+
+  // Create and open csv file to export to
+  FILE* output = fopen(outCsvFull, "w+");
+  free(outCsvFull);
+  if (output == NULL) {
+    fprintf(stderr, "Output file could not be created\n");
     return 1;
   }
-  // Go through all arguments (not first since that's the command)
-  int inFound = 0;
-  for (int i = 1; i < argc; i++) {
-    if (strcmp("-l", argv[i]) == 0) { // List flag
-      if (*flags % 2 == 0) { // Check if already specified
-        *flags += 1;
-      } else {
-        fprintf(stderr, "Duplicate -l flag found\n");
-        return 1;
-      }
-    } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
-      if ((*flags / 2) % 2 == 0) { // Check if already specified
-        *flags += 2;
-        if (++i != argc && argv[i][0] != '-') { // Check next argument
-          *out_csv = argv[i];
-        } else {
-          fprintf(stderr, "Output file path for -o not specified\n");
-          return 1;
-        }
-      } else {
-        fprintf(stderr, "Duplicate -o flag found\n");
-        return 1;
-      }
-    } else { // Input path
-      if (inFound == 0) {  // Check if already specified
-        *in_csv = argv[i];
-        inFound++;
-      } else {
-        fprintf(stderr, "Unexpected argument found\n");
-        return 1;
-      }
-    }
-  }
+  write_to_file(output);
+  fclose(output);
   return 0;
 }
 
 int main(int argc, char* argv[]) {
   // Read and store arguments in easy to use manner
-  char* in_csv = NULL;
-  char* out_csv = NULL;
+  char* inCsv = NULL;
+  char* outCsv = NULL;
   int flags = 0; // flag structure -> +1 for -l, +2 for -o
-  if (process_arguments(argc, argv, &flags, &in_csv, &out_csv) != 0) {
-    fprintf(stderr, "Usage: ./sudoku.out [-l] [-o <new_csv_path>] <csv_path>\n"
-                    "Options:\n"
+  if (process_arguments(argc, argv, &flags, &inCsv, &outCsv) != 0) {
+    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-o <new_csv_name>] <csv_path>"
+                    "\nOptions:\n"
                     " -l lists steps in solving\n"
-                    " -o exports solved grid to a new csv");
+                    " -o exports solved grid to a new csv\n");
     return 1;
   }
 
   // Load up contents of the file into grid
-  if (read_csv(in_csv) != 0) {
+  if (read_csv(inCsv) != 0) {
     fprintf(stderr, "File could not be read");
     return 1;
   }
 
   // Show the contents of the file
-  printf("Input:\n");
-  print_grid(0);
+  printf("Input:");
+  print_grid();
 
   // Calculate the result
   int cellsLeft = 0;
   pre_process(&cellsLeft);
-  while (process_next(&cellsLeft) != 1) {}
+  while (process_next(&cellsLeft, flags % 2) != 1) {}
 
   // Display solution
-  printf("Output:\n");
-  print_grid(0);
+  printf("\nOutput:");
+  print_grid();
+  if ((flags / 2) % 2 == 1) { // If output flag set, export
+    if (export_grid(outCsv) != 0) {
+      return 1;
+    }
+  }
 }
