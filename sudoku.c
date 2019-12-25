@@ -1,17 +1,18 @@
-// TODO: Allow for dynamically sized sudoku grids of n^2
+// TODO: Add command line argument to provide missing value where missing
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
+#define READ_BUF_SIZE 500
 #define PAD_SIZE 15
-#define VALUES 9
-#define SUB_SIZE 3
 
-char grid[VALUES][VALUES]; // Don't need it to be int as no processing done
-int possible[VALUES][VALUES][VALUES]; // Stores all possibilities (Space n^3)!
-int possibleCount[VALUES][VALUES]; // Trades off space in favour of time
-char valid[] = {'-', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+char*** grid; // Don't need it to be int as no processing done
+int*** possible; // Stores all possibilities (Space n^3)!
+int** possibleCount; // Trades off space in favour of time
+char** valid;
+int VALUES, SUB_SIZE;
 
 // Processes the command line arguments provided
 int process_arguments(int argc, char* argv[], int* flags,
@@ -57,47 +58,147 @@ int process_arguments(int argc, char* argv[], int* flags,
   return 0;
 }
 
-// Gets the value from a token
-char get_token_value(char* token) {
-  for (int cur = 0; token[cur] != '\0'; cur++) {
-    if (token[cur] == ' ' || token[cur] == '\n') { // Ignore whitespace
-      continue;
-    }
-    for (int i = 0; i < 11; i++) {
-      if (token[cur] == valid[i]) { // If the token is valid, return it
-        return token[cur];
-      }
-    }
-    return '-'; // If the token is not vali, return '-'
+int initialize_globals(char buffer[READ_BUF_SIZE]) {
+  // Gets number of values
+  int values = 1;
+  for (int i = 0; buffer[i]; i++) {
+    values += (buffer[i] == ',');
   }
-  return '-'; // If the token is just whitespace, return '-'
+  VALUES = values;
+  float root = sqrt((float) VALUES);
+  if (floor(root) != root) { // If not a square number
+    fprintf(stderr, "File doesn't have square number of values\n");
+    return 1;
+  }
+  SUB_SIZE = (int) root;
+
+  // Calloc all dependant on values here
+  grid = calloc(VALUES, sizeof(char*));
+  for (int i = 0; i < VALUES; i++) {
+    grid[i] = calloc(VALUES, sizeof(char*));
+  }
+
+  possible = calloc(VALUES, sizeof(int*));
+  for (int i = 0; i < VALUES; i++) {
+    possible[i] = calloc(VALUES, sizeof(int*));
+    for (int j = 0; j < VALUES; j++) {
+      possible[i][j] = calloc(VALUES, sizeof(int));
+    }
+  }
+
+  possibleCount = calloc(VALUES, sizeof(int*));
+  for (int i = 0; i < VALUES; i++) {
+    possibleCount[i] = calloc(VALUES, sizeof(int));
+  }
+
+  valid = calloc(VALUES + 1, sizeof(char*));
+  valid[0] = strdup("-");
+  return 0;
+}
+
+void free_globals() {
+  // No need to free cells, since they reference those in valid
+  for (int i = 0; i < VALUES; i++) {
+    free(grid[i]); // Free row
+  }
+  free(grid); // Free all
+
+  for (int i = 0; i < VALUES; i++) {
+    for (int j = 0; j < VALUES; j++) {
+      free(possible[i][j]); // Free array
+    }
+    free(possible[i]); // Free row
+  }
+  free(possible); // Free all
+
+  for (int i = 0; i < VALUES; i++) {
+    free(possibleCount[i]); // Free row
+  }
+  free(possibleCount); // Free all
+
+  for (int i = 0; i <= VALUES; i++) {
+    free(valid[i]); // Free values
+  }
+  free(valid);
+}
+
+int addToValid(int* tokenCount, char* token) {
+  int new = 1;
+  for (int i = 0; i < *tokenCount; i++) {
+    if (strcmp(valid[i], token) == 0) {
+      new = 0;
+    }
+  }
+  if (new == 1) {
+    if (*tokenCount >= VALUES + 1) {
+      fprintf(stderr, "Too many different valid tokens in grid\n");
+      return 1;
+    }
+    valid[*tokenCount] = strdup(token);
+    (*tokenCount)++;
+  }
+  return 0;
+}
+
+int process_token(int* tokenCount, char* token, int row, int col) {
+  if (strchr(token, '\n') != NULL) { // Sanitize token
+    *strchr(token, '\n') = '\0';
+  }
+  if (strchr(token, '\r') != NULL) {
+    *strchr(token, '\r') = '\0';
+  }
+
+  if (addToValid(tokenCount, token) != 0) { // If not in valid, add to it
+    return 1;
+  };
+
+  for (int i = 0; i < *tokenCount; i++) { // Set reference to valid string
+    if (strcmp(valid[i], token) == 0) {
+      grid[row][col] = valid[i];
+    }
+  }
+  return 0;
 }
 
 // Reads from a csv file and loads into the grid
 int read_csv(const char* fileName) {
   FILE* input = fopen(fileName, "r");
-  char buffer[100];
+  if (input == NULL) {
+    fprintf(stderr, "CSV file could not be opened for reading\n");
+    return -1;
+  }
+  char buffer[READ_BUF_SIZE];
   int row = 0;
-  while (fgets(buffer, 100, input) && row < VALUES) { // Read through file
+
+  if (initialize_globals(fgets(buffer, READ_BUF_SIZE, input)) != 0) {
+    return -1;
+  }
+  int tokenCount = 1;
+
+  do { // Read through file
     buffer[strcspn(buffer, "\n")] = 0;
     char* token = strtok(buffer, ","); // Split the line with ',' as delimiter
     int col = 0;
     while (token != NULL && col < VALUES) { // Store all values into the grid
-      grid[row][col] = get_token_value(token);
+      if (process_token(&tokenCount, token, row, col) != 0) {
+        fclose(input);
+        return 1;
+      }
       token = strtok(NULL, ",");
       col++;
     }
     if (col < VALUES) { // If fewer values than expected detected
       fprintf(stderr,
-        "Too few columns in row %i: Expected %i, not %i", row + 1, VALUES, col);
+        "Too few columns in row %i: Expected %i, not %i\n", row + 1, VALUES, col);
       fclose(input);
       return 1;
     }
     row++;
-  }
+    memset(buffer, 0, sizeof(buffer));
+  } while (fgets(buffer, READ_BUF_SIZE, input) && row < VALUES);
   fclose(input);
   if (row < VALUES) { // If fewer rows than expected detected
-    fprintf(stderr, "Too few rows in grid: Expected %i, not %i.", VALUES, row);
+    fprintf(stderr, "Too few rows in grid: Expected %i, not %i\n", VALUES, row);
     return 1;
   }
   return 0;
@@ -107,11 +208,11 @@ int read_csv(const char* fileName) {
 void get_columns_bitmap(int array[VALUES][VALUES]) {
   for (int col = 0; col < VALUES; col++) {
     for (int row = 0; row < VALUES; row++) {
-      if (grid[row][col] == '-') {
+      if (strcmp(grid[row][col], "-") == 0) {
         continue;
       }
       for (int val = 0; val < VALUES; val++) {
-        if (grid[row][col] == valid[val+1]) {
+        if (strcmp(grid[row][col], valid[val+1]) == 0) {
           array[col][val] = 1;
         }
       }
@@ -125,12 +226,12 @@ void get_subgrids_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
     for (int row = 0; row < SUB_SIZE; row++) {
       for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of subGrid
         for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
-          if (grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol] == '-') {
+          if (strcmp(grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol], "-") == 0) {
             continue;
           } // If not empty, find and mark value
           for (int val = 0; val < VALUES; val++) {
-            if (grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol]
-              == valid[val+1]) {
+            if (strcmp(grid[row*SUB_SIZE + subRow][col*SUB_SIZE + subCol],
+                valid[val+1]) == 0) {
               array[row][col][val] = 1;
             }
           }
@@ -143,11 +244,11 @@ void get_subgrids_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
 // Stores all the current row as a bitmap of numbers
 void get_row_bitmap(int row, int array[VALUES]) {
   for (int col = 0; col < VALUES; col++) {
-    if (grid[row][col] == '-') {
+    if (strcmp(grid[row][col], "-") == 0) {
       continue;
     }
     for (int val = 0; val < VALUES; val++) {
-      if (grid[row][col] == valid[val+1]) {
+      if (strcmp(grid[row][col], valid[val+1]) == 0) {
         array[val] = 1;
       }
     }
@@ -173,7 +274,8 @@ void pre_process(int* cellsLeft) {
     for (int col = 0; col < VALUES; col++) {
       for (int val = 0; val < VALUES; val++) {
         // Check if already full, is in the row, column or subGrid
-        if (grid[row][col] == '-' && curRow[val] == 0 && allCols[col][val] == 0
+        if (strcmp(grid[row][col], "-") == 0
+        && curRow[val] == 0 && allCols[col][val] == 0
         && subGrids[row / SUB_SIZE][col / SUB_SIZE][val] == 0) {
           if (possibleCount[row][col] == 0) {
             *cellsLeft += 1;
@@ -283,7 +385,7 @@ int process_next(int* cellsLeft, int listSteps) {
 
   // Show affected
   if (listSteps == 1) {
-    printf("Added %c at (%i, %i)\n", valid[value], pair[0], pair[1]);
+    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
   }
   free(pair);
   return 0;
@@ -318,13 +420,13 @@ void print_array(int* array, int len, int isPadded) {
 void print_grid() {
   printf("\n_________________________\n"); // Top
   for (int row = 0; row < VALUES; row++) {
-    if (row % 3 == 0 && row != 0) {
+    if (row % SUB_SIZE == 0 && row != 0) {
       printf("-------------------------\n"); // Row sectioner
     }
     printf("| "); // Left
     for (int col = 0; col < VALUES; col++) {
-      printf("%c ", grid[row][col]);
-      if ((col+1) % 3 == 0) {
+      printf("%s ", grid[row][col]);
+      if ((col+1) % SUB_SIZE == 0) {
         printf("| "); // Col sectioner and Right
       }
     }
@@ -335,14 +437,18 @@ void print_grid() {
 
 // Writes the contents of the grid to a file in csv format
 void write_to_file(FILE* output) {
-  char buffer[2 * VALUES];
+  char buffer[READ_BUF_SIZE];
   for (int row = 0; row < VALUES; row++) {
+    int bufPos = 0;
     memset(buffer, '\0', sizeof(buffer));
     for (int col = 0; col < VALUES; col++) {
-      buffer[2 * col] = grid[row][col];
-      buffer[2 * col + 1] = ',';
+      int len = strlen(grid[row][col]);
+      strncpy(&buffer[bufPos], grid[row][col], len);
+      bufPos += len;
+      buffer[bufPos] = ',';
+      bufPos += 1;
     }
-    buffer[2 * VALUES - 1] = '\0';
+    buffer[bufPos-1] = '\0';
     fprintf(output, "%s\n", buffer);
   }
 }
@@ -383,9 +489,12 @@ int main(int argc, char* argv[]) {
   }
 
   // Load up contents of the file into grid
-  if (read_csv(inCsv) != 0) {
-    fprintf(stderr, "File could not be read");
-    return 1;
+  switch (read_csv(inCsv)) {
+    case 1:
+      free_globals();
+    case -1:
+      fprintf(stderr, "File could not be read\n");
+      return 1;
   }
 
   // Show the contents of the file
@@ -402,7 +511,9 @@ int main(int argc, char* argv[]) {
   print_grid();
   if ((flags / 2) % 2 == 1) { // If output flag set, export
     if (export_grid(outCsv) != 0) {
+      free_globals();
       return 1;
     }
   }
+  free_globals();
 }
