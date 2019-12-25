@@ -1,7 +1,5 @@
 // TODO: Allow for dynamically sized sudoku grids of n^2
 // TODO: Allow command arguments to increase usability
-// TODO: Maybe decrease global variable usage
-// TODO: Act on valgrind error warnings
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +12,6 @@
 char grid[VALUES][VALUES]; // Don't need it to be int as no processing done
 int possible[VALUES][VALUES][VALUES]; // Stores all possibilities (Space n^3)!
 int possibleCount[VALUES][VALUES]; // Trades off space in favour of time
-int cellsLeft = 0; // To keep track of when solved
 char valid[] = {'-', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
 
 // Gets the value from a token
@@ -115,7 +112,7 @@ void get_row_bitmap(int row, int array[VALUES]) {
 }
 
 // Initializes a bitmap to hold possible values
-void pre_process() {
+void pre_process(int* cellsLeft) {
   int allCols[VALUES][VALUES]; // Stores all columns as bitmap before main loop
   memset(allCols, 0, sizeof(allCols)); // Initialize before use
   get_columns_bitmap(allCols);
@@ -136,7 +133,7 @@ void pre_process() {
         if (grid[row][col] == '-' && curRow[val] == 0 && allCols[col][val] == 0
         && subGrids[row / SUB_SIZE][col / SUB_SIZE][val] == 0) {
           if (possibleCount[row][col] == 0) {
-            cellsLeft += 1;
+            *cellsLeft += 1;
           }
           possible[row][col][val] = 1; // Mark as possible if none match
           possibleCount[row][col] += 1;
@@ -151,7 +148,7 @@ int* find_next() {
   for (int row = 0; row < VALUES; row++) {
     for (int col = 0; col < VALUES; col++) {
       if (possibleCount[row][col] == 1) {
-        int* pair = calloc(0, 2*sizeof(int));
+        int* pair = calloc(2, sizeof(int));
         pair[0] = row;
         pair[1] = col;
         return pair;
@@ -209,21 +206,21 @@ void remove_value_from_subgrid(int* pair, int value) {
     if (inCol + subCol == pair[0] && inRow + subRow == pair[1]) {
       continue;
     }
-    if (possible[subRow+inRow][subCol+inCol][value-1] == 1) {
-      possible[subRow+inRow][subCol+inCol][value-1] = 0;
-      possibleCount[subRow+inRow][subCol+inCol] -= 1;
+    if (possible[subRow + inRow][subCol + inCol][value - 1] == 1) {
+      possible[subRow + inRow][subCol + inCol][value - 1] = 0;
+      possibleCount[subRow + inRow][subCol + inCol] -= 1;
     }
   }
 }
 
 // Process the next iteration of the loop
-int process_next() {
-  if (cellsLeft == 0) {
+int process_next(int* cellsLeft) {
+  if (*cellsLeft == 0) {
     return 1;
   }
   int* pair = find_next(); // Find cell with only one left
   if (pair == NULL) { // If not found, report
-    fprintf(stderr, "Didn't find next pair. Cells left: %i", cellsLeft);
+    fprintf(stderr, "Didn't find next pair. Cells left: %i", *cellsLeft);
     return 1;
   }
   int value = get_possible_value(pair);
@@ -235,7 +232,7 @@ int process_next() {
   grid[pair[0]][pair[1]] = valid[value];
   possible[pair[0]][pair[1]][value - 1] = 0;
   possibleCount[pair[0]][pair[1]] -= 1;
-  cellsLeft -= 1;
+  *cellsLeft -= 1;
 
   remove_value_from_row(pair, value);
   remove_value_from_column(pair, value);
@@ -320,8 +317,9 @@ int main() {
   print_grid(0);
 
   // Calculate the result
-  pre_process();
-  while (process_next() != 1) {}
+  int cellsLeft = 0;
+  pre_process(&cellsLeft);
+  while (process_next(&cellsLeft) != 1) {}
 
   // Display solution
   printf("Output:\n");
