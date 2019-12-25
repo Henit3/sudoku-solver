@@ -305,10 +305,66 @@ void print_possible() {
   print_grid(2); // Print the number of possibilities in each cell
 }
 
-int main() {
+// Processes the command line arguments provided
+int process_arguments(int argc, char* argv[], int* flags,
+                      char** in_csv, char** out_csv) {
+  // Check if enough arguments provided
+  if (argc < 2) {
+    fprintf(stderr, "Not enough arguments\n");
+    return 1;
+  }
+  // Go through all arguments (not first since that's the command)
+  int inFound = 0;
+  for (int i = 1; i < argc; i++) {
+    if (strcmp("-l", argv[i]) == 0) { // List flag
+      if (*flags % 2 == 0) { // Check if already specified
+        *flags += 1;
+      } else {
+        fprintf(stderr, "Duplicate -l flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
+      if ((*flags / 2) % 2 == 0) { // Check if already specified
+        *flags += 2;
+        if (++i != argc && argv[i][0] != '-') { // Check next argument
+          *out_csv = argv[i];
+        } else {
+          fprintf(stderr, "Output file path for -o not specified\n");
+          return 1;
+        }
+      } else {
+        fprintf(stderr, "Duplicate -o flag found\n");
+        return 1;
+      }
+    } else { // Input path
+      if (inFound == 0) {  // Check if already specified
+        *in_csv = argv[i];
+        inFound++;
+      } else {
+        fprintf(stderr, "Unexpected argument found\n");
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+int main(int argc, char* argv[]) {
+  // Read and store arguments in easy to use manner
+  char* in_csv = NULL;
+  char* out_csv = NULL;
+  int flags = 0; // flag structure -> +1 for -l, +2 for -o
+  if (process_arguments(argc, argv, &flags, &in_csv, &out_csv) != 0) {
+    fprintf(stderr, "Usage: ./sudoku.out [-l] [-o <new_csv_path>] <csv_path>\n"
+                    "Options:\n"
+                    " -l lists steps in solving\n"
+                    " -o exports solved grid to a new csv");
+    return 1;
+  }
+
   // Load up contents of the file into grid
-  if (read_csv("csv/hard.csv") != 0) {
-    printf("File could not be read");
+  if (read_csv(in_csv) != 0) {
+    fprintf(stderr, "File could not be read");
     return 1;
   }
 
