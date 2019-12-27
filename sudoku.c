@@ -24,7 +24,7 @@ int process_arguments(int argc, char* argv[], int* flag,
   int inFound = 0;
   for (int i = 1; i < argc; i++) {
     if (strcmp("-l", argv[i]) == 0) { // List flag
-      if (flag == 0) { // Check if already specified
+      if (*flag == 0) { // Check if already specified
         *flag = 1;
       } else {
         fprintf(stderr, "Duplicate -l flag found\n");
@@ -215,13 +215,16 @@ int read_csv(const char* fileName, char* missing) {
     return 1;
   }
 
-  if (tokenCount <= VALUES) { // If not enough values
+  if (tokenCount == VALUES) { // If not enough values
     if (missing != NULL) {
       valid[VALUES] = strdup(missing);
     } else {
-      fprintf(stderr, "Not enough different values so X substituted\n");
+      fprintf(stderr, "Missing one values so X substituted\n");
       valid[VALUES] = strdup("X");
     }
+  } else if (tokenCount < VALUES) {
+    fprintf(stderr, "Not enough values provided, expected: %i\n", VALUES);
+    return 1;
   }
   return 0;
 }
@@ -311,17 +314,127 @@ void pre_process(int* cellsLeft) {
   }
 }
 
+// Dynamically allocated and initializes a pair of values
+int* make_pair(int row, int col) {
+  int* pair = calloc(2, sizeof(int));
+  pair[0] = row;
+  pair[1] = col;
+  return pair;
+}
+
 // Gets the next pair of row and column where there is only one possibility
-int* find_next() {
+int* find_single() {
   for (int row = 0; row < VALUES; row++) {
     for (int col = 0; col < VALUES; col++) {
       if (possibleCount[row][col] == 1) {
-        int* pair = calloc(2, sizeof(int));
-        pair[0] = row;
-        pair[1] = col;
-        return pair;
+        return make_pair(row, col);
       }
     }
+  }
+  return NULL;
+}
+
+// Gets pair of row and col that is only place for a possible value in a row
+int* unique_in_row(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int row = 0; row < VALUES; row++) { // Check in each row
+    memset(checkArray, 0, sizeof(checkArray)); // Reset array
+    for (int col = 0; col < VALUES; col++) { // Update value in checkArray
+      // Go through possibilities in cell and add to checkArray
+      for (int val = 0; val < VALUES; val++) {
+        if (possible[row][col][val] == 1) {
+          checkArray[val][0] += 1; // Increase the frequency of the value
+          checkArray[val][1] = col; // Set last found to this column
+        }
+      }
+    }
+    // Go through all values and see if frequency is 1, if so, output it
+    for (int val = 0; val < VALUES; val++) {
+      if (checkArray[val][0] == 1) {
+        printf("Unique value in row\n");
+        *value = val + 1;
+        return make_pair(row, checkArray[val][1]);
+      }
+    }
+  }
+  return NULL;
+}
+
+// Gets pair of row and col that is only place for a possible value in a col
+int* unique_in_col(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int col = 0; col < VALUES; col++) { // Check in each subGrid
+    memset(checkArray, 0, sizeof(checkArray)); // Reset array
+    for (int row = 0; row < VALUES; row++) { // Go through cells in subGrid // Update value in checkArray
+      // Go through possibilities in cell and add to checkArray
+      for (int val = 0; val < VALUES; val++) {
+        if (possible[row][col][val] == 1) {
+          checkArray[val][0] += 1; // Increase the frequency of the value
+          checkArray[val][1] = row; // Set last found to this row
+        }
+      }
+    }
+    // Go through all values and see if frequency is 1, if so, output it
+    for (int val = 0; val < VALUES; val++) {
+      if (checkArray[val][0] == 1) {
+        printf("Unique value in col\n");
+        *value = val + 1;
+        return make_pair(checkArray[val][1], col);
+      }
+    }
+  }
+  return NULL;
+}
+
+// Gets pair of row and col that is only place for a possible value in a subGrid
+// Not sure if ever needed so couldn't be tested
+int* unique_in_subgrid(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
+    for (int row = 0; row < SUB_SIZE; row++) {
+      memset(checkArray, 0, sizeof(checkArray)); // Reset array
+      for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of subGrid
+        for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+          int curRow = row * SUB_SIZE + subRow;
+          int curCol = col * SUB_SIZE + subCol;
+          // Go through possibilities in cell and add to checkArray
+          for (int val = 0; val < VALUES; val++) {
+            if (possible[curRow][curCol][val] == 1) {
+              checkArray[val][0] += 1; // Increase the frequency of the val
+              int curIndex = curCol * SUB_SIZE + curRow;
+              checkArray[val][1] = curIndex; // Set last found to curIndex
+            }
+          }
+        }
+      }
+      // Go through all values and see if frequency is 1, if so, output it
+      for (int val = 0; val < VALUES; val++) {
+        if (checkArray[val][0] == 1) {
+          printf("Unique value in subGrid\n");
+          int* pair = calloc(2, sizeof(int));
+          int pairRow = (row * SUB_SIZE) + (checkArray[val][1] / SUB_SIZE);
+          int pairCol = (col * SUB_SIZE) + (checkArray[val][1] % SUB_SIZE);
+          *value = val + 1;
+          return make_pair(pairRow, pairCol);
+        }
+      }
+    }
+  }
+  return NULL;
+}
+
+// Gets a pair of row and col which is the only possible location for a
+//  certain value in a region using other three "unique_in" functions
+int* unique_in_range(int mode, int* value) {
+  int* output = NULL;
+  if ((output = unique_in_row(value)) != NULL) {
+    return output;
+  }
+  if ((output = unique_in_col(value)) != NULL) {
+    return output;
+  }
+  if ((output = unique_in_subgrid(value)) != NULL) {
+    return output;
   }
   return NULL;
 }
@@ -381,39 +494,6 @@ void remove_value_from_subgrid(int* pair, int value) {
   }
 }
 
-// Process the next iteration of the loop
-int process_next(int* cellsLeft, int listSteps) {
-  if (*cellsLeft == 0) {
-    return 1;
-  }
-  int* pair = find_next(); // Find cell with only one left
-  if (pair == NULL) { // If not found, report
-    fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
-    return 1;
-  }
-  int value = get_possible_value(pair);
-  if (value == -1) {
-    fprintf(stderr, "Empty cell processed\n");
-    return 1;
-  }
-
-  grid[pair[0]][pair[1]] = valid[value];
-  possible[pair[0]][pair[1]][value - 1] = 0;
-  possibleCount[pair[0]][pair[1]] -= 1;
-  *cellsLeft -= 1;
-
-  remove_value_from_row(pair, value);
-  remove_value_from_column(pair, value);
-  remove_value_from_subgrid(pair, value);
-
-  // Show affected
-  if (listSteps == 1) {
-    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
-  }
-  free(pair);
-  return 0;
-}
-
 // Prints a grid cell's possible contents
 void print_array(int* array, int len, int isPadded) {
   printf("{");
@@ -421,10 +501,10 @@ void print_array(int* array, int len, int isPadded) {
   for (int i = 0; i < len; i++) {
     if (array[i] == 1) {
       if (count == 0) {
-        printf("%i", i + 1);
+        printf("%s", valid[i + 1]);
         count += 1;
       } else {
-        printf(" %i", i + 1);
+        printf(" %s", valid[i + 1]);
         count += 2;
       }
     }
@@ -437,6 +517,69 @@ void print_array(int* array, int len, int isPadded) {
       printf(" ");
     }
   }
+}
+
+// Prints all possible values for each cell in the grid (FOR TESTING)
+void print_possible() {
+  printf("\n_________________________\n"); // Top
+  for (int row = 0; row < VALUES; row++) {
+    if (row % SUB_SIZE == 0 && row != 0) {
+      printf("-------------------------\n"); // Row sectioner
+    }
+    printf("| "); // Left
+    for (int col = 0; col < VALUES; col++) {
+      print_array(possible[row][col], VALUES, 1);
+      if ((col + 1) % SUB_SIZE == 0) {
+        printf("| "); // Col sectioner and Right
+      }
+    }
+    printf("\n");
+  }
+  printf("_________________________\n\n"); // Bottom
+}
+
+// Process the next iteration of the loop
+int process_next(int* cellsLeft, int listSteps) {
+  if (*cellsLeft == 0) {
+    return 1;
+  }
+  int value = -1;
+  int* pair = find_single(); // Find cell with only one left
+  if (pair == NULL) { // If not found, try other methods
+    for (int mode = 0; mode < 3; mode++) { // Loop through row, then col, then subGrid
+      if ((pair = unique_in_range(mode, &value)) != NULL) { // If found, stop checking
+        break;
+      }
+    }
+    if (pair == NULL) { // If there still is not pair found then throw error
+      fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
+      return 1;
+    }
+  } else {
+    value = get_possible_value(pair);
+  }
+  if (value == -1) {
+    fprintf(stderr, "Empty cell processed\n");
+    return 1;
+  }
+
+  grid[pair[0]][pair[1]] = valid[value];
+  for (int val = 0; val < VALUES; val++) {
+    possible[pair[0]][pair[1]][val] = 0;
+  }
+  possibleCount[pair[0]][pair[1]] = 0;
+  *cellsLeft -= 1;
+
+  remove_value_from_row(pair, value);
+  remove_value_from_column(pair, value);
+  remove_value_from_subgrid(pair, value);
+
+  // Show affected
+  if (listSteps == 1) {
+    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
+  }
+  free(pair);
+  return 0;
 }
 
 // Prints the current state of the grid in a formatted output
