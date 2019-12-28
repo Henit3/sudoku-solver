@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #define ROW_BUF_SIZE 500
 #define PAD_SIZE 15
@@ -13,7 +14,8 @@ char** valid;
 int VALUES, SUB_SIZE;
 
 // Processes the command line arguments provided
-int process_arguments(int argc, char* argv[], int* flag,
+int process_arguments(int argc, char* argv[],
+                      int* listFlag, int* bulkFlag, int* timeFlag,
                       char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
@@ -24,10 +26,24 @@ int process_arguments(int argc, char* argv[], int* flag,
   int inFound = 0;
   for (int i = 1; i < argc; i++) {
     if (strcmp("-l", argv[i]) == 0) { // List flag
-      if (*flag == 0) { // Check if already specified
-        *flag = 1;
+      if (*listFlag == 0) { // Check if already specified
+        *listFlag = 1;
       } else {
         fprintf(stderr, "Duplicate -l flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-t", argv[i]) == 0) { // Time flag
+      if (*timeFlag == 0) { // Check if already specified
+        *timeFlag = 1;
+      } else {
+        fprintf(stderr, "Duplicate -t flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-b", argv[i]) == 0) { // Bulk flag
+      if (*bulkFlag == 0) { // Check if already specified
+        *bulkFlag = 1;
+      } else {
+        fprintf(stderr, "Duplicate -b flag found\n");
         return 1;
       }
     } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
@@ -68,19 +84,21 @@ int process_arguments(int argc, char* argv[], int* flag,
 }
 
 // Allocates and initializes the global variables
-int initialize_globals(char buffer[ROW_BUF_SIZE]) {
+int initialize_globals(char buffer[ROW_BUF_SIZE], int isBulk) {
   // Gets number of values
-  int values = 1;
-  for (int i = 0; buffer[i]; i++) {
-    values += (buffer[i] == ',');
+  if (!isBulk) {
+    int values = 1;
+    for (int i = 0; buffer[i]; i++) {
+      values += (buffer[i] == ',');
+    }
+    VALUES = values;
+    float root = sqrt((float) VALUES);
+    if (floor(root) != root) { // If not a square number
+      fprintf(stderr, "File doesn't have square number of values\n");
+      return 1;
+    }
+    SUB_SIZE = (int) root;
   }
-  VALUES = values;
-  float root = sqrt((float) VALUES);
-  if (floor(root) != root) { // If not a square number
-    fprintf(stderr, "File doesn't have square number of values\n");
-    return 1;
-  }
-  SUB_SIZE = (int) root;
 
   // Calloc all dependant on values here
   grid = calloc(VALUES, sizeof(char*));
@@ -135,6 +153,10 @@ void free_globals() {
 
 // Add the token to the valid array if not full
 int addToValid(int* tokenCount, char* token) {
+  // if (token[0] == '\0') { // If empty token, skip
+  //   printf("Null char found\n");
+  //   return 0;
+  // }
   int new = 1;
   for (int i = 0; i < *tokenCount; i++) {
     if (strcmp(valid[i], token) == 0) {
@@ -155,6 +177,7 @@ int addToValid(int* tokenCount, char* token) {
 // Sanitize, and set the grid to reference a valid token
 int process_token(int* tokenCount, char* token, int row, int col) {
   if (strchr(token, '\n') != NULL) { // Sanitize token
+    printf("\\n converted at (%i, %i)\n", row, col);
     *strchr(token, '\n') = '\0';
   }
   if (strchr(token, '\r') != NULL) {
@@ -183,7 +206,7 @@ int read_csv(const char* fileName, char* missing) {
   char buffer[ROW_BUF_SIZE];
   int row = 0;
 
-  if (initialize_globals(fgets(buffer, ROW_BUF_SIZE, input)) != 0) {
+  if (initialize_globals(fgets(buffer, ROW_BUF_SIZE, input), 0) != 0) {
     return -1;
   }
   int tokenCount = 1;
@@ -215,14 +238,14 @@ int read_csv(const char* fileName, char* missing) {
     return 1;
   }
 
-  if (tokenCount == VALUES) { // If not enough values
+  if (tokenCount == VALUES) { // If missing one value
     if (missing != NULL) {
       valid[VALUES] = strdup(missing);
     } else {
       fprintf(stderr, "Missing one values so X substituted\n");
       valid[VALUES] = strdup("X");
     }
-  } else if (tokenCount < VALUES) {
+  } else if (tokenCount < VALUES) { // If not enough values
     fprintf(stderr, "Not enough values provided, expected: %i\n", VALUES);
     return 1;
   }
@@ -335,6 +358,7 @@ int* find_single() {
 }
 
 // Gets pair of row and col that is only place for a possible value in a row
+// (4 found in 1 million)
 int* unique_in_row(int* value) {
   int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
   for (int row = 0; row < VALUES; row++) { // Check in each row
@@ -351,7 +375,6 @@ int* unique_in_row(int* value) {
     // Go through all values and see if frequency is 1, if so, output it
     for (int val = 0; val < VALUES; val++) {
       if (checkArray[val][0] == 1) {
-        printf("Unique value in row\n");
         *value = val + 1;
         return make_pair(row, checkArray[val][1]);
       }
@@ -361,6 +384,7 @@ int* unique_in_row(int* value) {
 }
 
 // Gets pair of row and col that is only place for a possible value in a col
+// (0 found in 1 million)
 int* unique_in_col(int* value) {
   int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
   for (int col = 0; col < VALUES; col++) { // Check in each subGrid
@@ -377,7 +401,6 @@ int* unique_in_col(int* value) {
     // Go through all values and see if frequency is 1, if so, output it
     for (int val = 0; val < VALUES; val++) {
       if (checkArray[val][0] == 1) {
-        printf("Unique value in col\n");
         *value = val + 1;
         return make_pair(checkArray[val][1], col);
       }
@@ -387,7 +410,7 @@ int* unique_in_col(int* value) {
 }
 
 // Gets pair of row and col that is only place for a possible value in a subGrid
-// Not sure if ever needed so couldn't be tested
+// Not sure if ever needed so couldn't be tested (0 found in 1 million)
 int* unique_in_subgrid(int* value) {
   int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
   for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
@@ -641,28 +664,150 @@ int export_grid(char* outCsv) {
   return 0;
 }
 
+// TO CHANGE!
+// Dependant on single character values
+// If bulk flag set, then read_bulk will have loop within it when solving
+int read_bulk(const char* fileName) {
+  FILE* input = fopen(fileName, "r");
+  if (input == NULL) {
+    fprintf(stderr, "Bulk CSV file could not be opened for reading\n");
+    return -1;
+  }
+  int solvedCount = 0;
+  char buffer[ROW_BUF_SIZE];
+  char* current = buffer;
+  fgets(buffer, ROW_BUF_SIZE, input); // Skip first line
+  while (fgets(buffer, ROW_BUF_SIZE, input)) {
+    current = buffer;
+    // Use buffer upto comma char to parse in question
+    int len = strcspn(current, ",");
+    // Check if len corresponds to square grid
+    VALUES = (int) sqrt(len);
+    float root = sqrt((float) VALUES);
+    if (floor(root) != root) { // If not a square number
+      fprintf(stderr, "File doesn't have square number of values\n");
+      fclose(input);
+      return 1;
+    }
+    SUB_SIZE = (int) root;
+    if (initialize_globals(NULL, 1) != 0) { // Don't need to provide buffer
+      return -1;
+    }
+    // Parse into grid (0 equivalent to '-')
+    int tokenCount = 1;
+    for (int curChar = 0; curChar < len; curChar++) { // All char in question
+      // Get character, make it a token and process it
+      char inChar = current[curChar];
+      if (inChar == '0') { // Replace 0 with '-'
+        inChar = '-';
+      }
+      char token[] = {inChar, '\0'}; // Make char into temp string
+
+      if (process_token(&tokenCount, token,
+          curChar / VALUES, curChar % VALUES) != 0) {
+        fclose(input);
+        return 1;
+      }
+    }
+
+    if (tokenCount == VALUES) { // If missing one value
+      valid[VALUES] = strdup("X");
+    } else if (tokenCount < VALUES) { // If not enough values
+      fprintf(stderr, "Not enough values provided, expected: %i\n", VALUES);
+      return 1;
+    }
+
+    // Calculate the result
+    int cellsLeft = 0;
+    pre_process(&cellsLeft);
+    while (process_next(&cellsLeft, 0) != 1) {} // listFlag irrelevant here
+
+    // Set current to be first char of solution
+    current = &buffer[len + 1];
+    int diff = strcspn(current, ",") - len; // counts potential \n
+    if (diff < 0) { // If solution smaller
+      fprintf(stderr, "Solution smaller than the question\n");
+      fclose(input);
+      return 1;
+    }
+
+    // Check if solution matches
+    int matches = 1;
+    char missing = 'X';
+    for (int curChar = 0; curChar < len - diff; curChar++) { // All char in solution
+      char inChar = current[curChar];
+      if (inChar == '0') { // Replace 0 with '-'
+        inChar = '-';
+      }
+      // Check this token against one in grid (only need to compare first char)
+      if (inChar != grid[curChar / VALUES][curChar % VALUES][0]) {
+        if (grid[curChar / VALUES][curChar % VALUES][0] == 'X') {
+          missing = inChar;
+        } else {
+          matches = 0; // Set to not matching
+          break;
+        }
+      }
+    }
+
+    if (!matches) {
+      fprintf(stderr, "Sudoku solution does not match expected answer\n");
+      fclose(input);
+      return 1;
+    }
+
+    free_globals(); // Ready for next sudoku
+
+    solvedCount += 1;
+    printf("Solved %i\n", solvedCount);
+  }
+  fclose(input);
+  return 0;
+}
+
+int read_file(char* inCsv, char* missing, int isBulk) {
+  if (isBulk) {
+    return read_bulk(inCsv);
+  } else {
+    return read_csv(inCsv, missing);
+  }
+}
+
 int main(int argc, char* argv[]) {
+  clock_t time = clock(); // Benchmarking
   // Read and store arguments in easy to use manner
   char* inCsv = NULL;
   char* outCsv = NULL;
   char* missing = NULL;
-  int listFlag = 0; // flag structure -> +1 for -l, +2 for -o, +4 for -m
-  if (process_arguments(argc, argv, &listFlag, &inCsv, &outCsv, &missing) != 0) {
-    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-o <new_csv_name>] "
+  int listFlag = 0;
+  int bulkFlag = 0;
+  int timeFlag = 0;
+  if (process_arguments(argc, argv, &listFlag, &bulkFlag, &timeFlag,
+      &inCsv, &outCsv, &missing) != 0) {
+    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-b] [-t] [-o <new_csv_name>] "
                     "[-m <missing_arg>] <csv_path>\nOptions:\n"
                     " -l lists steps in solving\n"
+                    " -b solves a batch execution of sudokus (one per line)\n"
+                    " -t shows the benchmarked time for reading and execution\n"
                     " -o exports solved grid to a new csv\n"
                     " -m provide missing argument if not in the grid");
     return 1;
   }
 
   // Load up contents of the file into grid
-  switch (read_csv(inCsv, missing)) {
-    case 1:
+  switch (read_file(inCsv, missing, bulkFlag)) {
+    case 1: // After Initialized globals
       free_globals();
     case -1:
-      fprintf(stderr, "File could not be read\n");
+      fprintf(stderr, "Error reading file\n");
       return 1;
+  }
+
+  if (bulkFlag == 1) { // If it was bulk processed already
+    printf("Bulk file processed");
+    time = clock() - time; // For benchmarking
+    printf("Time elasped: %f\n", ((double) time) / CLOCKS_PER_SEC);
+    return 0;
   }
 
   // Show the contents of the file
@@ -684,4 +829,7 @@ int main(int argc, char* argv[]) {
     }
   }
   free_globals();
+
+  time = clock() - time; // For benchmarking
+  printf("Time elasped: %f\n", ((double) time) / CLOCKS_PER_SEC);
 }
