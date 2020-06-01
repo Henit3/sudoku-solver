@@ -78,11 +78,26 @@ int process_arguments(int argc, char* argv[],
         fprintf(stderr, "Duplicate -m flag found\n");
         return 1;
       }
-    } else if (strcmp("-f", argv[i]) == 0) { // Force flag
+    } else if (strcmp("-f", argv[i]) == 0) { // Force flag [exclusive]
       if (*forceFlag == 0) { // Check if already specified
         *forceFlag = 1;
       } else {
-        fprintf(stderr, "Duplicate -f flag found\n");
+        if (*forceFlag == 1) {
+          fprintf(stderr, "Duplicate -f flag found\n");
+        } else {
+          fprintf(stderr, "Conflicting -f flag found\n");
+        }
+        return 1;
+      }
+    } else if (strcmp("-nf", argv[i]) == 0) { // Force flag [disable]
+      if (*forceFlag == 0) { // Check if already specified
+        *forceFlag = -1;
+      } else {
+        if (*forceFlag == -1) {
+          fprintf(stderr, "Duplicate -nf flag found\n");
+        } else {
+          fprintf(stderr, "Conflicting -nf flag found\n");
+        }
         return 1;
       }
     } else { // Input path
@@ -235,8 +250,8 @@ int read_csv(const char* fileName, char* missing) {
       col++;
     }
     if (col < VALUES) { // If fewer values than expected detected
-      fprintf(stderr,
-        "Too few columns in row %i: Expected %i, not %i\n", row + 1, VALUES, col);
+      fprintf(stderr,"Too few columns in row %i: Expected %i, not %i\n",
+              row + 1, VALUES, col);
       fclose(input);
       return 1;
     }
@@ -400,7 +415,7 @@ int* unique_in_col(int* value) {
   int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
   for (int col = 0; col < VALUES; col++) { // Check in each subGrid
     memset(checkArray, 0, sizeof(checkArray)); // Reset array
-    for (int row = 0; row < VALUES; row++) { // Go through cells in subGrid // Update value in checkArray
+    for (int row = 0; row < VALUES; row++) { // Go through cells in subGrid
       // Go through possibilities in cell and add to checkArray
       for (int val = 0; val < VALUES; val++) {
         if (possible[row][col][val] == 1) {
@@ -595,7 +610,8 @@ int valid_in_subgrid(int value, int row, int col) {
   int subRow = SUB_SIZE * (row / SUB_SIZE);
   int subCol = SUB_SIZE * (col / SUB_SIZE);
   for (int pos = 0; pos < VALUES; pos++) {
-    if (grid[subRow + (pos / SUB_SIZE)][subCol + (pos % SUB_SIZE)] == valid[value]) {
+    if (grid[subRow + (pos / SUB_SIZE)][subCol + (pos % SUB_SIZE)]
+        == valid[value]) {
       return 1;
     }
   }
@@ -620,7 +636,7 @@ int brute_force_rec(int cur_row, int cur_col, int verbosity) {
           value += 1;
           // Check if value is valid
           if (value > VALUES) {
-            // Reset current value to '-' if all values tried and failed (rollback)
+            // Reset current value to '-' if all values failed (rollback)
             grid[row][col] = valid[0];
             return 1;
           }
@@ -634,7 +650,8 @@ int brute_force_rec(int cur_row, int cur_col, int verbosity) {
           }
           grid[row][col] = valid[value];
           // Return if successful till the end, otherwise keep looping
-          if (brute_force_rec(row + (col + 1) / VALUES, (col + 1) % VALUES, verbosity) == 0) {
+          if (brute_force_rec(row + (col + 1) / VALUES,
+                              (col + 1) % VALUES, verbosity) == 0) {
             return 0;
           }
         }
@@ -649,30 +666,34 @@ int brute_force_rec(int cur_row, int cur_col, int verbosity) {
 
 // Wrapper function to handle result of recursive brute force appropriately
 void brute_force(int verbosity) {
+  if (verbosity > 0) {
+    fprintf(stderr, "Attempting brute force...\n");
+  }
   if (brute_force_rec(0, 0, verbosity) == 1) {
     printf("Brute Force failed.\n");
   }
 }
 
 // Process the next iteration of the loop
-int process_next(int* cellsLeft, int verbosity) {
+int process_next(int* cellsLeft, int verbosity, int forceFlag) {
   if (*cellsLeft == 0) {
     return 1;
   }
   int value = -1;
   int* pair = find_single(); // Find cell with only one left
   if (pair == NULL) { // If not found, try other methods
-    for (int mode = 0; mode < 3; mode++) { // Loop through row, then col, then subGrid
-      if ((pair = unique_in_range(mode, &value)) != NULL) { // If found, stop checking
-        break;
+    for (int mode = 0; mode < 3; mode++) { // Loop through row, col, subGrid
+      if ((pair = unique_in_range(mode, &value)) != NULL) {
+        break; // If found, stop checking
       }
     }
     if (pair == NULL) { // If there still is not pair found then try brute force
-      if (verbosity > 0) {
+      if (verbosity > 0 && forceFlag == -1) {
         fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
-        fprintf(stderr, "Attempting brute force...\n");
       }
-      brute_force(verbosity);
+      if (forceFlag != -1) { // If brute force not disabled
+        brute_force(verbosity);
+      }
       return 1;
     }
   } else {
@@ -775,7 +796,7 @@ int export_grid(char* outCsv) {
 // Reads, solves and checks all sudokus in a bulk sudoku file with the initial
 // and solution grid stored as VALUES^2 character strings (so it is dependant on
 // single character value tokens)
-int read_bulk(const char* fileName) {
+int read_bulk(const char* fileName, int forceFlag) {
   FILE* input = fopen(fileName, "r");
   if (input == NULL) {
     fprintf(stderr, "Bulk CSV file could not be opened for reading\n");
@@ -827,9 +848,13 @@ int read_bulk(const char* fileName) {
     }
 
     // Calculate the result
-    int cellsLeft = 0;
-    pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, 0) != 1) {} // verbosity irrelevant here
+    if (forceFlag == 1) {
+      brute_force(0);
+    } else {
+      int cellsLeft = 0;
+      pre_process(&cellsLeft);
+      while (process_next(&cellsLeft, 0, forceFlag) != 1) {}
+    }
 
     // Set current to be first char of solution
     current = &buffer[len + 1];
@@ -843,7 +868,7 @@ int read_bulk(const char* fileName) {
     // Check if solution matches
     int matches = 1;
     char missing = 'X';
-    for (int curChar = 0; curChar < len - diff; curChar++) { // All char in solution
+    for (int curChar = 0; curChar < len - diff; curChar++) { // Solution's chars
       char inChar = current[curChar];
       if (inChar == '0') { // Replace 0 with '-'
         inChar = '-';
@@ -877,9 +902,9 @@ int read_bulk(const char* fileName) {
 }
 
 // Adapter function to handle the reading of a file appropriate to its structure
-int read_file(char* inCsv, char* missing, int isBulk) {
+int read_file(char* inCsv, char* missing, int isBulk, int forceFlag) {
   if (isBulk) {
-    return read_bulk(inCsv);
+    return read_bulk(inCsv, forceFlag);
   } else {
     return read_csv(inCsv, missing);
   }
@@ -891,31 +916,33 @@ int main(int argc, char* argv[]) {
   char* inCsv = NULL;
   char* outCsv = NULL;
   char* missing = NULL;
-  int verbosity = 0;
-  int bulkFlag = 0;
-  int timeFlag = 0;
-  int forceFlag = 0;
+  int verbosity = 0; // [0, 1, 2]
+  int bulkFlag = 0; // [0, 1]
+  int timeFlag = 0; // [0, 1]
+  int forceFlag = 0; // [-1, 0, 1]
   if (process_arguments(argc, argv, &verbosity, &bulkFlag,
       &timeFlag, &forceFlag, &inCsv, &outCsv, &missing) != 0) {
-    fprintf(stderr, "\nUsage: ./sudoku.out [-v] [-vv] [-b] [-t] [f]"
+    fprintf(stderr, "\nUsage: ./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]]"
                     "[-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
-                    "Options:\n"
+                    "\nOptions:\n"
                     " -v verbose output, lists steps in solving\n"
                     " -vv extra verbose output, lists brute force steps\n"
                     " -b solves a batch execution of sudokus (one per line)\n"
                     " -t shows the benchmarked time for reading and execution\n"
                     " -f uses brute force for solving immediately\n"
+                    " -nf disables use of brute force\n"
                     " -o exports solved grid to a new csv\n"
                     " -m provide missing argument if not in the grid");
     return 1;
   }
 
+  // Start benchmarking
   if (timeFlag == 1) {
-    time = clock(); // Benchmarking
+    time = clock();
   }
 
   // Load up contents of the file into grid
-  switch (read_file(inCsv, missing, bulkFlag)) {
+  switch (read_file(inCsv, missing, bulkFlag, forceFlag)) {
     case 1: // After Initialized globals
       free_globals();
     case -1:
@@ -923,7 +950,8 @@ int main(int argc, char* argv[]) {
       return 1;
   }
 
-  if (bulkFlag == 1) { // If it was bulk processed already
+  // Bulk processing end
+  if (bulkFlag == 1) {
     printf("Bulk file processed\n");
     if (timeFlag == 1) {
       time = clock() - time; // For benchmarking
@@ -942,7 +970,7 @@ int main(int argc, char* argv[]) {
   } else {
     int cellsLeft = 0;
     pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, verbosity) != 1) {}
+    while (process_next(&cellsLeft, verbosity, forceFlag) != 1) {}
   }
 
   // Display solution
@@ -956,6 +984,7 @@ int main(int argc, char* argv[]) {
   }
   free_globals();
 
+  // End benchmarking
   if (timeFlag == 1) {
     time = clock() - time; // For benchmarking
     printf("Time elasped: %f\n", ((double) time) / CLOCKS_PER_SEC);
