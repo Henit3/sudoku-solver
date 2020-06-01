@@ -584,10 +584,10 @@ int valid_in_col(int value, int col) {
 
 // Checks if the value is valid (no duplicates) in the given subgrid
 int valid_in_subgrid(int value, int row, int col) {
-  int subRow = SUB_SIZE * (row / 3);
-  int subCol = SUB_SIZE * (col / 3);
+  int subRow = SUB_SIZE * (row / SUB_SIZE);
+  int subCol = SUB_SIZE * (col / SUB_SIZE);
   for (int pos = 0; pos < VALUES; pos++) {
-    if (grid[subRow + (pos / 3)][subCol + (pos % 3)] == valid[value]) {
+    if (grid[subRow + (pos / SUB_SIZE)][subCol + (pos % SUB_SIZE)] == valid[value]) {
       return 1;
     }
   }
@@ -596,6 +596,7 @@ int valid_in_subgrid(int value, int row, int col) {
 
 // Attempts to solve using a brute force mechanism
 int brute_force_rec(int cur_row, int cur_col) {
+  // printf("Brute Force(%i, %i)\n", cur_row, cur_col);
   int col_set = 0;
   for (int row = cur_row; row < VALUES; row++) {
     for (int col = 0; col < VALUES; col++) {
@@ -617,6 +618,7 @@ int brute_force_rec(int cur_row, int cur_col) {
           if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 || valid_in_subgrid(value, row, col) != 0) {
             continue;
           }
+          // printf("Forced: %i, %i, %i\n", row, col, value);
           grid[row][col] = valid[value];
           // Return if successful till the end, otherwise keep looping
           if (brute_force_rec(row + (col + 1) / VALUES, (col + 1) % VALUES) == 0) {
@@ -624,6 +626,9 @@ int brute_force_rec(int cur_row, int cur_col) {
           }
         }
       }
+      // else {
+      //   printf("Skipped: %i, %i\n", row, col);
+      // }
     }
   }
   return 0;
