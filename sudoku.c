@@ -15,7 +15,7 @@ int VALUES, SUB_SIZE;
 
 // Processes the command line arguments provided
 int process_arguments(int argc, char* argv[],
-                      int* listFlag, int* bulkFlag, int* timeFlag,
+                      int* listFlag, int* bulkFlag, int* timeFlag, int* forceFlag,
                       char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
@@ -68,6 +68,13 @@ int process_arguments(int argc, char* argv[],
         }
       } else {
         fprintf(stderr, "Duplicate -m flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-f", argv[i]) == 0) { // Force flag
+      if (*forceFlag == 0) { // Check if already specified
+        *forceFlag = 1;
+      } else {
+        fprintf(stderr, "Duplicate -f flag found\n");
         return 1;
       }
     } else { // Input path
@@ -555,6 +562,86 @@ void print_possible() {
   printf("_________________________\n\n"); // Bottom
 }
 
+// Checks if the value is valid (no duplicates) in the given row
+int valid_in_row(int value, int row) {
+  for (int col = 0; col < VALUES; col++) {
+    if (grid[row][col] == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// Checks if the value is valid (no duplicates) in the given column
+int valid_in_col(int value, int col) {
+  for (int row = 0; row < VALUES; row++) {
+    if (grid[row][col] == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// Checks if the value is valid (no duplicates) in the given subgrid
+int valid_in_subgrid(int value, int row, int col) {
+  int subRow = SUB_SIZE * (row / 3);
+  int subCol = SUB_SIZE * (col / 3);
+  for (int pos = 0; pos < VALUES; pos++) {
+    if (grid[subRow + (pos / 3)][subCol + (pos % 3)] == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+// Attempts to solve using a brute force mechanism
+int brute_force_rec(int cur_row, int cur_col) {
+  int col_set = 0;
+  for (int row = cur_row; row < VALUES; row++) {
+    for (int col = 0; col < VALUES; col++) {
+      if (col_set == 0) {
+        col = cur_col;
+        col_set = 1;
+      }
+      if (grid[row][col] == valid[0]) {
+        int value = 0;
+        while (1) {
+          value += 1;
+          // Check if value is valid
+          if (value > VALUES) {
+            // Reset current value to '-' if all values tried and failed (rollback)
+            grid[row][col] = valid[0];
+            return 1;
+          }
+          // If invalid for that position, then try with the next one
+          if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 || valid_in_subgrid(value, row, col) != 0) {
+            continue;
+          }
+          grid[row][col] = valid[value];
+          // Return if successful till the end, otherwise keep looping
+          if (brute_force_rec(row + (col + 1) / VALUES, (col + 1) % VALUES) == 0) {
+            return 0;
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+void brute_force() {
+  // Go through each value and if filled, ignore.
+  // If blank, then check value from 1-9, insert.
+  // If none applicable, then go back and change last value inserted.
+  // This requires storing a list of the values inserted -> can do recursion or linked list
+  // Structure would require position
+  if (brute_force_rec(0, 0) == 1) {
+    printf("Brute Force failed.\n");
+  }
+  // If recursion used, then return 1 to increment, 0 to indicate success
+  // Pass in position currently at to make it faster
+}
+
 // Process the next iteration of the loop
 int process_next(int* cellsLeft, int listSteps) {
   if (*cellsLeft == 0) {
@@ -569,7 +656,8 @@ int process_next(int* cellsLeft, int listSteps) {
       }
     }
     if (pair == NULL) { // If there still is not pair found then throw error
-      fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
+      fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft); // Change to indicate brute_force applied, so no steps
+      // TODO: Brute force from this point onwards
       return 1;
     }
   } else {
@@ -790,7 +878,8 @@ int main(int argc, char* argv[]) {
   int listFlag = 0;
   int bulkFlag = 0;
   int timeFlag = 0;
-  if (process_arguments(argc, argv, &listFlag, &bulkFlag, &timeFlag,
+  int forceFlag = 0;
+  if (process_arguments(argc, argv, &listFlag, &bulkFlag, &timeFlag, &forceFlag,
       &inCsv, &outCsv, &missing) != 0) {
     fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-b] [-t] [-o <new_csv_name>] "
                     "[-m <missing_arg>] <csv_path>\nOptions:\n"
@@ -798,7 +887,8 @@ int main(int argc, char* argv[]) {
                     " -b solves a batch execution of sudokus (one per line)\n"
                     " -t shows the benchmarked time for reading and execution\n"
                     " -o exports solved grid to a new csv\n"
-                    " -m provide missing argument if not in the grid");
+                    " -m provide missing argument if not in the grid\n"
+                    " -f uses brute force for solving (negates -l)");
     return 1;
   }
 
@@ -829,9 +919,13 @@ int main(int argc, char* argv[]) {
   print_grid();
 
   // Calculate the result
-  int cellsLeft = 0;
-  pre_process(&cellsLeft);
-  while (process_next(&cellsLeft, listFlag) != 1) {}
+  if (forceFlag == 1) {
+    brute_force();
+  } else {
+    int cellsLeft = 0;
+    pre_process(&cellsLeft);
+    while (process_next(&cellsLeft, listFlag) != 1) {}
+  }
 
   // Display solution
   printf("\nOutput:");
