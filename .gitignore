@@ -2,3 +2,7 @@
 *.bat
 *.exe
 *.out
+
+# Batch CSV files
+*.batch.csv
+!thousand_9x9.batch.csv
