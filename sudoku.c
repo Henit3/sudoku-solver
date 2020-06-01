@@ -15,7 +15,8 @@ int VALUES, SUB_SIZE;
 
 // Processes the command line arguments provided
 int process_arguments(int argc, char* argv[],
-                      int* listFlag, int* bulkFlag, int* timeFlag, int* forceFlag,
+                      int* verbosity, int* bulkFlag,
+                      int* timeFlag, int* forceFlag,
                       char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
@@ -25,11 +26,18 @@ int process_arguments(int argc, char* argv[],
   // Go through all arguments (not first since that's the command)
   int inFound = 0;
   for (int i = 1; i < argc; i++) {
-    if (strcmp("-l", argv[i]) == 0) { // List flag
-      if (*listFlag == 0) { // Check if already specified
-        *listFlag = 1;
+    if (strcmp("-v", argv[i]) == 0) { // Verbose flag
+      if (*verbosity < 1) { // Check if already specified
+        *verbosity = 1;
+      } else if (*verbosity == 1) {
+        fprintf(stderr, "Duplicate -v flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-vv", argv[i]) == 0) { // Extra Verbose flag
+      if (*verbosity < 2) { // Check if already specified (overwrites -v)
+        *verbosity = 2;
       } else {
-        fprintf(stderr, "Duplicate -l flag found\n");
+        fprintf(stderr, "Duplicate -vv flag found\n");
         return 1;
       }
     } else if (strcmp("-t", argv[i]) == 0) { // Time flag
@@ -595,8 +603,10 @@ int valid_in_subgrid(int value, int row, int col) {
 }
 
 // Attempts to solve using a brute force mechanism
-int brute_force_rec(int cur_row, int cur_col) {
-  // printf("Brute Force(%i, %i)\n", cur_row, cur_col);
+int brute_force_rec(int cur_row, int cur_col, int verbosity) {
+  if (verbosity == 2) {
+    printf("Brute Force(%i, %i)\n", cur_row, cur_col);
+  }
   int col_set = 0;
   for (int row = cur_row; row < VALUES; row++) {
     for (int col = 0; col < VALUES; col++) {
@@ -615,40 +625,37 @@ int brute_force_rec(int cur_row, int cur_col) {
             return 1;
           }
           // If invalid for that position, then try with the next one
-          if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 || valid_in_subgrid(value, row, col) != 0) {
+          if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 ||
+              valid_in_subgrid(value, row, col) != 0) {
             continue;
           }
-          // printf("Forced: %i, %i, %i\n", row, col, value);
+          if (verbosity == 2) {
+            printf("Forced: %i, %i, %i\n", row, col, value);
+          }
           grid[row][col] = valid[value];
           // Return if successful till the end, otherwise keep looping
-          if (brute_force_rec(row + (col + 1) / VALUES, (col + 1) % VALUES) == 0) {
+          if (brute_force_rec(row + (col + 1) / VALUES, (col + 1) % VALUES, verbosity) == 0) {
             return 0;
           }
         }
       }
-      // else {
-      //   printf("Skipped: %i, %i\n", row, col);
-      // }
+      else if (verbosity == 2) {
+        printf("Skipped: %i, %i\n", row, col);
+      }
     }
   }
   return 0;
 }
 
-void brute_force() {
-  // Go through each value and if filled, ignore.
-  // If blank, then check value from 1-9, insert.
-  // If none applicable, then go back and change last value inserted.
-  // This requires storing a list of the values inserted -> can do recursion or linked list
-  // Structure would require position
-  if (brute_force_rec(0, 0) == 1) {
+// Wrapper function to handle result of recursive brute force appropriately
+void brute_force(int verbosity) {
+  if (brute_force_rec(0, 0, verbosity) == 1) {
     printf("Brute Force failed.\n");
   }
-  // If recursion used, then return 1 to increment, 0 to indicate success
-  // Pass in position currently at to make it faster
 }
 
 // Process the next iteration of the loop
-int process_next(int* cellsLeft, int listSteps) {
+int process_next(int* cellsLeft, int verbosity) {
   if (*cellsLeft == 0) {
     return 1;
   }
@@ -660,9 +667,12 @@ int process_next(int* cellsLeft, int listSteps) {
         break;
       }
     }
-    if (pair == NULL) { // If there still is not pair found then throw error
-      fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft); // Change to indicate brute_force applied, so no steps
-      // TODO: Brute force from this point onwards
+    if (pair == NULL) { // If there still is not pair found then try brute force
+      if (verbosity > 0) {
+        fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
+        fprintf(stderr, "Attempting brute force...\n");
+      }
+      brute_force(verbosity);
       return 1;
     }
   } else {
@@ -685,7 +695,7 @@ int process_next(int* cellsLeft, int listSteps) {
   remove_value_from_subgrid(pair, value);
 
   // Show affected
-  if (listSteps == 1) {
+  if (verbosity > 0) {
     printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
   }
   free(pair);
@@ -819,7 +829,7 @@ int read_bulk(const char* fileName) {
     // Calculate the result
     int cellsLeft = 0;
     pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, 0) != 1) {} // listFlag irrelevant here
+    while (process_next(&cellsLeft, 0) != 1) {} // verbosity irrelevant here
 
     // Set current to be first char of solution
     current = &buffer[len + 1];
@@ -866,6 +876,7 @@ int read_bulk(const char* fileName) {
   return 0;
 }
 
+// Adapter function to handle the reading of a file appropriate to its structure
 int read_file(char* inCsv, char* missing, int isBulk) {
   if (isBulk) {
     return read_bulk(inCsv);
@@ -880,20 +891,22 @@ int main(int argc, char* argv[]) {
   char* inCsv = NULL;
   char* outCsv = NULL;
   char* missing = NULL;
-  int listFlag = 0;
+  int verbosity = 0;
   int bulkFlag = 0;
   int timeFlag = 0;
   int forceFlag = 0;
-  if (process_arguments(argc, argv, &listFlag, &bulkFlag, &timeFlag, &forceFlag,
-      &inCsv, &outCsv, &missing) != 0) {
-    fprintf(stderr, "\nUsage: ./sudoku.out [-l] [-b] [-t] [-o <new_csv_name>] "
-                    "[-m <missing_arg>] <csv_path>\nOptions:\n"
-                    " -l lists steps in solving\n"
+  if (process_arguments(argc, argv, &verbosity, &bulkFlag,
+      &timeFlag, &forceFlag, &inCsv, &outCsv, &missing) != 0) {
+    fprintf(stderr, "\nUsage: ./sudoku.out [-v] [-vv] [-b] [-t] [f]"
+                    "[-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
+                    "Options:\n"
+                    " -v verbose output, lists steps in solving\n"
+                    " -vv extra verbose output, lists brute force steps\n"
                     " -b solves a batch execution of sudokus (one per line)\n"
                     " -t shows the benchmarked time for reading and execution\n"
+                    " -f uses brute force for solving immediately\n"
                     " -o exports solved grid to a new csv\n"
-                    " -m provide missing argument if not in the grid\n"
-                    " -f uses brute force for solving (negates -l)");
+                    " -m provide missing argument if not in the grid");
     return 1;
   }
 
@@ -925,11 +938,11 @@ int main(int argc, char* argv[]) {
 
   // Calculate the result
   if (forceFlag == 1) {
-    brute_force();
+    brute_force(verbosity);
   } else {
     int cellsLeft = 0;
     pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, listFlag) != 1) {}
+    while (process_next(&cellsLeft, verbosity) != 1) {}
   }
 
   // Display solution
