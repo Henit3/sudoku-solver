@@ -655,65 +655,6 @@ void brute_force(int verbosity) {
   }
 }
 
-
-/* --- PROCESS LOOP --- */
-
-// Process the next iteration of the loop
-int process_next(int* cellsLeft, int verbosity, int forceFlag) {
-  if (*cellsLeft == 0) {
-    return 1;
-  }
-  int value = -1;
-  int* pair = find_single(); // Find cell with only one left
-  if (pair == NULL) { // If not found, try other methods
-    for (int mode = 0; mode < 3; mode++) { // Loop through row, col, subGrid
-      if ((pair = unique_in_range(mode, &value)) != NULL) {
-        break; // If found, stop checking
-      }
-    }
-    // If still no pair then use ommision and disjoint subsets to reduce possibilities and try again.
-    // eliminate_redundant();
-    // pair = find_single();
-    if (pair == NULL) { // If there still is not pair found then try brute force
-      if (verbosity > 0 && forceFlag == -1) {
-        fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
-      }
-      if (forceFlag != -1) { // If brute force not disabled, use it to finish
-        brute_force(verbosity);
-      }
-      return 1;
-    }
-  }
-  if (value == -1) { // Only for single, since unique in range sets appropriate value
-    value = get_possible_value(pair);
-  }
-  if (value == -1) {
-    fprintf(stderr, "Empty cell processed\n");
-    return 1;
-  }
-
-  grid[pair[0]][pair[1]] = valid[value];
-  for (int val = 0; val < VALUES; val++) {
-    possible[pair[0]][pair[1]][val] = 0;
-  }
-  possibleCount[pair[0]][pair[1]] = 0;
-  *cellsLeft -= 1;
-
-  remove_value_from_row(pair, value);
-  remove_value_from_column(pair, value);
-  remove_value_from_subgrid(pair, value);
-
-  // Show affected
-  if (verbosity > 0) {
-    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
-  }
-  free(pair);
-  return 0;
-}
-
-
-/* --- PRINTERS --- */
-
 // Prints a grid cell's possible contents
 void print_array(int* array, int len, int isPadded) {
   printf("{");
@@ -757,6 +698,211 @@ void print_possible() {
   }
   printf("_________________________\n\n"); // Bottom
 }
+
+
+/* --- REDUNDANCY REMOVERS --- */
+
+int focus_region(int region_bm[SUB_SIZE]) {
+  int focus = -1;
+  for (int i = 0; i < SUB_SIZE; i++) {
+    if (region_bm[i] == 1) {
+      if (focus != -1) { // Re-assignment means no focus
+        return -1;
+      }
+      focus = i;
+    }
+  }
+  return focus;
+}
+
+// Find value in only overlapping region and remove from rest of other region
+void ommision() {
+  printf("Using ommision...\n");
+  // print_possible();
+  int region_bm[SUB_SIZE];
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    printf("Row %i\n", row);
+    for (int value = 0; value < VALUES; value++) {
+      memset(region_bm, 0, sizeof(region_bm));
+      for (int col = 0; col < VALUES; col++) {
+        if (possible[row][col][value] == 1) {
+          region_bm[col / SUB_SIZE] = 1;
+        }
+      }
+      int focus = focus_region(region_bm); // Subgrid for the row
+      if (focus != -1) { // Subgrid Ommision by Row
+        int subRow = (row / SUB_SIZE) * SUB_SIZE;
+        int subCol = focus * SUB_SIZE;
+        for (int pos = 0; pos < VALUES; pos++) {
+          // Not the same row but in the subGrid
+          if (subRow + pos / 3 != row &&
+              possible[subRow + pos / 3][subCol + pos % 3][value] == 1) {
+            possible[subRow + pos / 3][subCol + pos % 3][value] = 0;
+            possibleCount[subRow + pos / 3][subCol + pos % 3] -= 1;
+            printf("Using ommision (row -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
+            printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / 3, subCol + pos % 3);
+          }
+        }
+      }
+    }
+  }
+  // print_possible();
+  // COLUMN
+  for (int col = 0; col < VALUES; col++) {
+    printf("Column %i\n", col);
+    for (int value = 0; value < VALUES; value++) {
+      memset(region_bm, 0, sizeof(region_bm));
+      for (int row = 0; row < VALUES; row++) {
+        if (possible[row][col][value] == 1) {
+          region_bm[row / SUB_SIZE] = 1;
+        }
+      }
+      int focus = focus_region(region_bm); // Subgrid for the row
+      if (focus != -1) { // Subgrid Ommision by Row
+        int subRow = focus * SUB_SIZE;
+        int subCol = (col / SUB_SIZE) * SUB_SIZE;
+        for (int pos = 0; pos < VALUES; pos++) {
+          // Not the same col but in the subGrid
+          if (subCol + pos % 3 != col &&
+              possible[subRow + pos / 3][subCol + pos % 3][value] == 1) {
+            possible[subRow + pos / 3][subCol + pos % 3][value] = 0;
+            possibleCount[subRow + pos / 3][subCol + pos % 3] -= 1;
+            printf("Using ommision (col -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
+            printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / 3, subCol + pos % 3);
+          }
+        }
+      }
+    }
+  }
+  // print_possible();
+  // SUBGRID
+  int row_bm[SUB_SIZE];
+  int col_bm[SUB_SIZE];
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      printf("Subgrid (%i, %i)\n", subRow, subCol);
+      for (int value = 1; value <= VALUES; value++) {
+        memset(row_bm, 0, sizeof(row_bm));
+        memset(col_bm, 0, sizeof(col_bm));
+        for (int pos = 0; pos < VALUES; pos++) {
+          if (possible[subRow * SUB_SIZE + (pos / SUB_SIZE)][subCol * SUB_SIZE + (pos % SUB_SIZE)][value]
+              == 1) {
+            row_bm[pos / SUB_SIZE] = 1;
+            col_bm[pos % SUB_SIZE] = 1;
+          }
+        }
+        int focus = focus_region(row_bm);
+        if (focus != -1) { // Row Ommision by Subgrid
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same subGrid but on the row
+            if (i / 3 != subCol &&
+                possible[subRow * SUB_SIZE + focus][i][value] == 1) {
+              possible[subRow * SUB_SIZE + focus][i][value] = 0;
+              possibleCount[subRow * SUB_SIZE + focus][i] -= 1;
+              printf("Using ommision (subgrid -> row), with value %s, row = %i: ", valid[value + 1], focus);
+              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow * SUB_SIZE + focus, i);
+            }
+          }
+        }
+        focus = focus_region(col_bm);
+        if (focus != -1) { // Col Ommision by Subgrid
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same subGrid but on the col
+            if (i / 3 != subRow &&
+                possible[i][subCol * SUB_SIZE + focus][value] == 1) {
+              possible[i][subCol * SUB_SIZE + focus][value] = 0;
+              possibleCount[i][subCol * SUB_SIZE + focus] -= 1;
+              printf("Using ommision (subgrid -> col), with value %s, col = %i: ", valid[value + 1], focus);
+              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], i, subCol * SUB_SIZE + focus);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void naked_pairs() {
+  // Loop through all regions and find 2 cells with only identical pair, remove from all other regions involved
+}
+
+void hidden_pairs() {
+  // Loop through all regions and find 2 cells with pair that only appear there, remove other values from those cells
+}
+
+void eliminate_redundant() {
+  printf("Removing redundant values...\n");
+  ommision();
+  // naked_pairs();
+  // hidden_pairs();
+}
+
+
+/* --- PROCESS LOOP --- */
+
+// Process the next iteration of the loop
+int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
+  if (*cellsLeft == 0) {
+    return 1;
+  }
+  int value = -1;
+  int* pair = find_single(); // Find cell with only one left
+  if (pair == NULL) { // If not found, try other methods
+    for (int mode = 0; mode < 3; mode++) { // Loop through row, col, subGrid
+      if ((pair = unique_in_range(mode, &value)) != NULL) {
+        break; // If found, stop checking
+      }
+    }
+    if (pair == NULL) { // If there still is not pair found then try brute force
+      if (*stripped == 0) {
+        // If still no pair then remove redundant values, mark this, try again
+        eliminate_redundant();
+        *stripped = 1;
+        return 0;
+      } else {
+        if (verbosity > 0 && forceFlag == -1) {
+          fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
+        }
+        if (forceFlag != -1) { // If brute force not disabled, use it to finish
+          brute_force(verbosity);
+        }
+        return 1;
+      }
+    }
+  }
+  if (value == -1) { // Only for single, since unique in range sets appropriate value
+    value = get_possible_value(pair);
+  }
+  if (value == -1) {
+    fprintf(stderr, "Empty cell processed\n");
+    return 1;
+  }
+
+  *stripped = 0;
+  grid[pair[0]][pair[1]] = valid[value];
+  for (int val = 0; val < VALUES; val++) {
+    possible[pair[0]][pair[1]][val] = 0;
+  }
+  possibleCount[pair[0]][pair[1]] = 0;
+  *cellsLeft -= 1;
+
+  remove_value_from_row(pair, value);
+  remove_value_from_column(pair, value);
+  remove_value_from_subgrid(pair, value);
+
+  // Show affected
+  if (verbosity > 0) {
+    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
+  }
+  free(pair);
+  return 0;
+}
+
+
+/* --- PRINTERS --- */
+
+// PRINT_POSSIBLE
 
 // Prints a line of given length with a given character
 void print_line(char type, int length) {
@@ -891,8 +1037,9 @@ int read_bulk(const char* fileName, int forceFlag) {
       brute_force(0);
     } else {
       int cellsLeft = 0;
+      int stripped = 0;
       pre_process(&cellsLeft);
-      while (process_next(&cellsLeft, 0, forceFlag) != 1) {}
+      while (process_next(&cellsLeft, &stripped, 0, forceFlag) != 1) {}
     }
 
     // Set current to be first char of solution
@@ -1010,8 +1157,9 @@ int main(int argc, char* argv[]) {
     brute_force(verbosity);
   } else {
     int cellsLeft = 0;
+    int stripped = 0;
     pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, verbosity, forceFlag) != 1) {}
+    while (process_next(&cellsLeft, &stripped, verbosity, forceFlag) != 1) {}
   }
 
   // Display solution
