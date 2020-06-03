@@ -519,46 +519,58 @@ int* unique_in_range(int mode, int* value) {
 /* --- REMOVERS --- */
 
 // Removes a value from the possibilities of all others in the same row
-void remove_value_from_row(int* pair, int value) {
+// Ignores values in the mask that have been set, takes value + 1
+void remove_value_from_row(int row, int value, int mask[VALUES], int print) {
   for (int col = 0; col < VALUES; col++) {
-    if (pair[1] == col) {
+    if (mask[col] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
-    if (possible[pair[0]][col][value - 1] == 1) {
-      possible[pair[0]][col][value - 1] = 0;
-      possibleCount[pair[0]][col] -= 1;
+    if (possible[row][col][value - 1] == 1) {
+      possible[row][col][value - 1] = 0;
+      possibleCount[row][col] -= 1;
+      if (print > 0) {
+        printf("Eliminated: %s at (%i, %i)\n", valid[value], row, col);
+      }
     }
   }
 }
 
 // Removes a value from the possibilities of all others in the same column
-void remove_value_from_column(int* pair, int value) {
+// Ignores values in the mask that have been set, takes value + 1
+void remove_value_from_column(int col, int value, int mask[VALUES], int print) {
   for (int row = 0; row < VALUES; row++) {
-    if (pair[0] == row) {
+    if (mask[row] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
-    if (possible[row][pair[1]][value - 1] == 1) {
-      possible[row][pair[1]][value - 1] = 0;
-      possibleCount[row][pair[1]] -= 1;
+    if (possible[row][col][value - 1] == 1) {
+      possible[row][col][value - 1] = 0;
+      possibleCount[row][col] -= 1;
+      if (print > 0) {
+        printf("Eliminated: %s at (%i, %i)\n", valid[value], row, col);
+      }
     }
   }
 }
 
 // Removes a value from the possibilities of all others in the same subGrid
-void remove_value_from_subgrid(int* pair, int value) {
-  int subRow = (pair[0] / SUB_SIZE) * SUB_SIZE;
-  int subCol = (pair[1] / SUB_SIZE) * SUB_SIZE;
+// Ignores values in the mask that have been set, takes value + 1
+void remove_value_from_subgrid(int row, int col, int value, int mask[VALUES], int print) {
+  int subRow = (row / SUB_SIZE) * SUB_SIZE;
+  int subCol = (col / SUB_SIZE) * SUB_SIZE;
   for (int i = 0; i < VALUES; i++) {
     int inRow = i / SUB_SIZE;
     int inCol = i % SUB_SIZE;
-    if (inCol + subCol == pair[0] && inRow + subRow == pair[1]) {
+    if (mask[i] == 1 || (inCol + subCol == col && inRow + subRow == row)) {
       continue;
     }
     if (possible[subRow + inRow][subCol + inCol][value - 1] == 1) {
       possible[subRow + inRow][subCol + inCol][value - 1] = 0;
       possibleCount[subRow + inRow][subCol + inCol] -= 1;
+      if (print > 0) {
+        printf("Eliminated: %s at (%i, %i)\n", valid[value], subRow + inRow, subCol + inCol);
+      }
     }
   }
 }
@@ -716,13 +728,13 @@ int focus_region(int region_bm[SUB_SIZE]) {
 }
 
 // Find value in only overlapping region and remove from rest of other region
-void ommision() {
-  printf("Using ommision...\n");
-  // print_possible();
+void ommision(int verbosity) {
+  if (verbosity > 0) {
+    printf("Using ommision...\n");
+  }
   int region_bm[SUB_SIZE];
   // ROW
   for (int row = 0; row < VALUES; row++) {
-    printf("Row %i\n", row);
     for (int value = 0; value < VALUES; value++) {
       memset(region_bm, 0, sizeof(region_bm));
       for (int col = 0; col < VALUES; col++) {
@@ -731,26 +743,26 @@ void ommision() {
         }
       }
       int focus = focus_region(region_bm); // Subgrid for the row
-      if (focus != -1) { // Subgrid Ommision by Row
+      if (focus != -1) { // Subgrid Ommision by Row (specialize REMOVERS)
         int subRow = (row / SUB_SIZE) * SUB_SIZE;
         int subCol = focus * SUB_SIZE;
         for (int pos = 0; pos < VALUES; pos++) {
           // Not the same row but in the subGrid
-          if (subRow + pos / 3 != row &&
-              possible[subRow + pos / 3][subCol + pos % 3][value] == 1) {
-            possible[subRow + pos / 3][subCol + pos % 3][value] = 0;
-            possibleCount[subRow + pos / 3][subCol + pos % 3] -= 1;
-            printf("Using ommision (row -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
-            printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / 3, subCol + pos % 3);
+          if (subRow + pos / SUB_SIZE != row &&
+              possible[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE][value] == 1) {
+            possible[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE][value] = 0;
+            possibleCount[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE] -= 1;
+            if (verbosity > 0) {
+              printf("Using ommision (row -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
+              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / SUB_SIZE, subCol + pos % SUB_SIZE);
+            }
           }
         }
       }
     }
   }
-  // print_possible();
   // COLUMN
   for (int col = 0; col < VALUES; col++) {
-    printf("Column %i\n", col);
     for (int value = 0; value < VALUES; value++) {
       memset(region_bm, 0, sizeof(region_bm));
       for (int row = 0; row < VALUES; row++) {
@@ -759,29 +771,29 @@ void ommision() {
         }
       }
       int focus = focus_region(region_bm); // Subgrid for the row
-      if (focus != -1) { // Subgrid Ommision by Row
+      if (focus != -1) { // Subgrid Ommision by Row (specialize REMOVERS)
         int subRow = focus * SUB_SIZE;
         int subCol = (col / SUB_SIZE) * SUB_SIZE;
         for (int pos = 0; pos < VALUES; pos++) {
           // Not the same col but in the subGrid
-          if (subCol + pos % 3 != col &&
-              possible[subRow + pos / 3][subCol + pos % 3][value] == 1) {
-            possible[subRow + pos / 3][subCol + pos % 3][value] = 0;
-            possibleCount[subRow + pos / 3][subCol + pos % 3] -= 1;
-            printf("Using ommision (col -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
-            printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / 3, subCol + pos % 3);
+          if (subCol + pos % SUB_SIZE != col &&
+              possible[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE][value] == 1) {
+            possible[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE][value] = 0;
+            possibleCount[subRow + pos / SUB_SIZE][subCol + pos % SUB_SIZE] -= 1;
+            if (verbosity > 0) {
+              printf("Using ommision (col -> subgrid), with value %s, focus = %i: ", valid[value + 1], focus);
+              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + pos / SUB_SIZE, subCol + pos % SUB_SIZE);
+            }
           }
         }
       }
     }
   }
-  // print_possible();
   // SUBGRID
   int row_bm[SUB_SIZE];
   int col_bm[SUB_SIZE];
   for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
     for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
-      printf("Subgrid (%i, %i)\n", subRow, subCol);
       for (int value = 1; value <= VALUES; value++) {
         memset(row_bm, 0, sizeof(row_bm));
         memset(col_bm, 0, sizeof(col_bm));
@@ -793,28 +805,32 @@ void ommision() {
           }
         }
         int focus = focus_region(row_bm);
-        if (focus != -1) { // Row Ommision by Subgrid
+        if (focus != -1) { // Row Ommision by Subgrid (specialize REMOVERS)
           for (int i = 0; i < VALUES; i++) {
             // Not the same subGrid but on the row
-            if (i / 3 != subCol &&
+            if (i / SUB_SIZE != subCol &&
                 possible[subRow * SUB_SIZE + focus][i][value] == 1) {
               possible[subRow * SUB_SIZE + focus][i][value] = 0;
               possibleCount[subRow * SUB_SIZE + focus][i] -= 1;
-              printf("Using ommision (subgrid -> row), with value %s, row = %i: ", valid[value + 1], focus);
-              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow * SUB_SIZE + focus, i);
+              if (verbosity > 0) {
+                printf("Using ommision (subgrid -> row), with value %s, row = %i: ", valid[value + 1], focus);
+                printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow * SUB_SIZE + focus, i);
+              }
             }
           }
         }
         focus = focus_region(col_bm);
-        if (focus != -1) { // Col Ommision by Subgrid
+        if (focus != -1) { // Col Ommision by Subgrid (specialize REMOVERS)
           for (int i = 0; i < VALUES; i++) {
             // Not the same subGrid but on the col
-            if (i / 3 != subRow &&
+            if (i / SUB_SIZE != subRow &&
                 possible[i][subCol * SUB_SIZE + focus][value] == 1) {
               possible[i][subCol * SUB_SIZE + focus][value] = 0;
               possibleCount[i][subCol * SUB_SIZE + focus] -= 1;
-              printf("Using ommision (subgrid -> col), with value %s, col = %i: ", valid[value + 1], focus);
-              printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], i, subCol * SUB_SIZE + focus);
+              if (verbosity > 0) {
+                printf("Using ommision (subgrid -> col), with value %s, col = %i: ", valid[value + 1], focus);
+                printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], i, subCol * SUB_SIZE + focus);
+              }
             }
           }
         }
@@ -823,18 +839,191 @@ void ommision() {
   }
 }
 
-void naked_pairs() {
-  // Loop through all regions and find 2 cells with only identical pair, remove from all other regions involved
+// Compares the possibilities of both cells with the assumption they are pairs
+int has_same_possibilities(int possibleA[VALUES], int possibleB[VALUES],
+                          int shared[2]) {
+  int valuesFound = 0;
+  for (int i = 0; i < VALUES; i++) {
+    if (possibleA[i] == 1) {
+      shared[valuesFound] = i;
+      valuesFound++;
+      if (valuesFound == 2) {
+        return 1;
+      }
+    }
+    if (possibleA[i] != possibleB[i]) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+// Make better by passing in pairs
+void remove_naked_pair(int rowA, int colA, int rowB, int colB, int shared[2],
+                      int mode, int verbosity) {
+  if (verbosity > 0) {
+    printf("Found naked pair (%s, %s) at (%i, %i), (%i, %i)\n",
+      valid[shared[0] + 1], valid[shared[1] + 1], rowA, colA, rowB, colB);
+  }
+  int mask[VALUES];
+  memset(mask, 0, sizeof(mask));
+  switch (mode) {
+    case 0: { // ROW
+      mask[colA] = 1;
+      mask[colB] = 1;
+      for (int i = 0; i < 2; i++) {
+        if (verbosity > 0) {
+          printf("Using naked pairs (row): ");
+        }
+        remove_value_from_row(rowA, shared[i] + 1, mask, verbosity);
+      }
+      break;
+    }
+    case 1: { // COL
+      mask[rowA] = 1;
+      mask[rowB] = 1;
+      for (int i = 0; i < 2; i++) {
+        if (verbosity > 0) {
+          printf("Using naked pairs (col): ");
+        }
+        remove_value_from_column(colA, shared[i] + 1, mask, verbosity);
+      }
+      break;
+    }
+    case 2: { // SUBGRID (same one)
+      mask[SUB_SIZE * (rowB % SUB_SIZE) + colB % SUB_SIZE] = 1;
+      for (int i = 0; i < 2; i++) {
+        if (verbosity > 0) {
+          printf("Using naked pairs (subGrid): ");
+        }
+        remove_value_from_subgrid(rowA, colA, shared[i] + 1, mask, verbosity);
+      }
+      break;
+    }
+    default: {
+      fprintf(stderr, "Invalid mode for removing naked pairs.");
+      exit(1);
+    }
+  }
+  print_possible();
+}
+
+// Loop through all regions and find 2 cells with only identical pair, remove from all other linked regions
+void naked_pairs(int verbosity) {
+  if (verbosity > 0) {
+    printf("Finding naked pairs...\n");
+  }
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    // If there are two or more cells with possibleCount 2, then consider them
+    int count = 0;
+    int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
+    memset(considered, 0, sizeof(considered));
+    for (int col = 0; col < VALUES; col++) {
+      if (possibleCount[row][col] == 2) {
+        count++;
+        considered[col] = 1;
+      }
+    }
+    // If these contain the same pair, then we found a hidden pair
+    for (int colA = 0; colA < VALUES; colA++) {
+      if (considered[colA] == 0) {
+        continue;
+      }
+      for (int colB = colA + 1; colB < VALUES; colB++) {
+        if (considered[colB] == 0) {
+          continue;
+        }
+        int shared[2];
+        if (has_same_possibilities(possible[row][colB], possible[row][colA], shared) == 1) {
+          // Naked pair found, time to remove these from everywhere else
+          remove_naked_pair(row, colA, row, colB, shared, 0, verbosity);
+          if (colA / SUB_SIZE == colB / SUB_SIZE) {
+            remove_naked_pair(row, colA, row, colB, shared, 2, verbosity);
+          }
+        }
+      }
+    }
+  }
+  // COL
+  for (int col = 0; col < VALUES; col++) {
+    // If there are two or more cells with possibleCount 2, then consider them
+    int count = 0;
+    int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
+    memset(considered, 0, sizeof(considered));
+    for (int row = 0; row < VALUES; row++) {
+      if (possibleCount[row][col] == 2) {
+        count++;
+        considered[row] = 1;
+      }
+    }
+    // If these contain the same pair, then we found a hidden pair
+    for (int rowA = 0; rowA < VALUES; rowA++) {
+      if (considered[rowA] == 0) {
+        continue;
+      }
+      for (int rowB = rowA + 1; rowB < VALUES; rowB++) {
+        if (considered[rowB] == 0) {
+          continue;
+        }
+        int shared[2];
+        if (has_same_possibilities(possible[rowA][col], possible[rowB][col], shared) == 1) {
+          // Naked pair found, time to remove these from everywhere else
+          remove_naked_pair(rowA, col, rowB, col, shared, 1, verbosity);
+          if (rowA / SUB_SIZE == rowB / SUB_SIZE) {
+            remove_naked_pair(rowA, col, rowB, col, shared, 2, verbosity);
+          }
+        }
+      }
+    }
+  }
+  // SUBGRID
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      // If there are two or more cells with possibleCount 2, then consider them
+      int count = 0;
+      int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
+      memset(considered, 0, sizeof(considered));
+      for (int pos = 0; pos < VALUES; pos++) {
+        if (possibleCount[subRow * SUB_SIZE + pos / SUB_SIZE][subCol * SUB_SIZE + pos % SUB_SIZE] == 2) {
+          count++;
+          considered[pos] = 1;
+        }
+      }
+      // If these contain the same pair, then we found a hidden pair
+      for (int posA = 0; posA < VALUES; posA++) {
+        if (considered[posA] == 0) {
+          continue;
+        }
+        for (int posB = posA + 1; posB < VALUES; posB++) {
+          if (considered[posB] == 0) {
+            continue;
+          }
+          int shared[2];
+          int rowA = subRow * SUB_SIZE + posA / SUB_SIZE;
+          int colA = subCol * SUB_SIZE + posA % SUB_SIZE;
+          int rowB = subRow * SUB_SIZE + posB / SUB_SIZE;
+          int colB = subCol * SUB_SIZE + posB % SUB_SIZE;
+          if (has_same_possibilities(possible[rowA][colA], possible[rowB][colB], shared) == 1) {
+            // Naked pair found, time to remove these from everywhere else
+            remove_naked_pair(rowA, colA, rowB, colB, shared, 2, verbosity);
+          }
+        }
+      }
+    }
+  }
 }
 
 void hidden_pairs() {
   // Loop through all regions and find 2 cells with pair that only appear there, remove other values from those cells
 }
 
-void eliminate_redundant() {
-  printf("Removing redundant values...\n");
-  ommision();
-  // naked_pairs();
+void eliminate_redundant(int verbosity) {
+  if (verbosity > 0) {
+    printf("Removing redundant values...\n");
+  }
+  ommision(verbosity);
+  naked_pairs(verbosity);
   // hidden_pairs();
 }
 
@@ -857,7 +1046,7 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
     if (pair == NULL) { // If there still is not pair found then try brute force
       if (*stripped == 0) {
         // If still no pair then remove redundant values, mark this, try again
-        eliminate_redundant();
+        eliminate_redundant(verbosity);
         *stripped = 1;
         return 0;
       } else {
@@ -887,9 +1076,15 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   possibleCount[pair[0]][pair[1]] = 0;
   *cellsLeft -= 1;
 
-  remove_value_from_row(pair, value);
-  remove_value_from_column(pair, value);
-  remove_value_from_subgrid(pair, value);
+  int mask[VALUES];
+  memset(mask, 0, sizeof(mask));
+  mask[pair[1]] = 1;
+  remove_value_from_row(pair[0], value, mask, 0);
+  mask[pair[1]] = 0;
+  mask[pair[0]] = 1;
+  remove_value_from_column(pair[1], value, mask, 0);
+  mask[pair[0]] = 0;
+  remove_value_from_subgrid(pair[0], pair[1], value, mask, 0);
 
   // Show affected
   if (verbosity > 0) {
