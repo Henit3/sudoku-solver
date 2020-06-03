@@ -5,7 +5,7 @@ Compilation:
 `clang -o sudoku.out sudoku.c` or `gcc -o sudoku.out sudoku.c -lm`
 
 Usage:
-`./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>`
+`./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]] [-d] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>`
 
 Options:
  * -v verbose output, lists steps in solving
@@ -14,6 +14,7 @@ Options:
  * -t shows the benchmarked time for reading and execution
  * -f uses brute force for solving immediately
  * -nf disables use of brute force
+ * -d debug mode, shows all possibilities for each cell
  * -o exports solved grid to a new csv
  * -m provide missing argument if not in the grid
 

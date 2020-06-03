@@ -10,13 +10,16 @@
 char*** grid; // Don't need it to be int as no processing done
 int*** possible; // Stores all possibilities (Space n^3)!
 int** possibleCount; // Trades off space in favour of time
-char** valid;
+char** valid; // Stores the valid symbols in the sudoku grid
 int VALUES, SUB_SIZE;
+
+
+/* --- INITIALIZERS --- */
 
 // Processes the command line arguments provided
 int process_arguments(int argc, char* argv[],
-                      int* verbosity, int* bulkFlag,
-                      int* timeFlag, int* forceFlag,
+                      int* verbosity, int* bulkFlag, int* timeFlag,
+                      int* forceFlag, int* debugFlag,
                       char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
@@ -52,6 +55,13 @@ int process_arguments(int argc, char* argv[],
         *bulkFlag = 1;
       } else {
         fprintf(stderr, "Duplicate -b flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-d", argv[i]) == 0) { // Debug flag
+      if (*debugFlag == 0) { // Check if already specified
+        *debugFlag = 1;
+      } else {
+        fprintf(stderr, "Duplicate -d flag found\n");
         return 1;
       }
     } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
@@ -278,6 +288,9 @@ int read_csv(const char* fileName, char* missing) {
   return 0;
 }
 
+
+/* --- PRE PROCESS POSSIBILITIES --- */
+
 // Stores all columns as a bitmap of numbers
 void get_columns_bitmap(int array[VALUES][VALUES]) {
   for (int col = 0; col < VALUES; col++) {
@@ -363,6 +376,9 @@ void pre_process(int* cellsLeft) {
   }
 }
 
+
+/* --- VALUE OBTAINERS --- */
+
 // Dynamically allocated and initializes a pair of values
 int* make_pair(int row, int col) {
   int* pair = calloc(2, sizeof(int));
@@ -382,6 +398,19 @@ int* find_single() {
   }
   return NULL;
 }
+
+// Assumes there is only one value in the bitmap and retrieves it
+int get_possible_value(int* pair) {
+  for (int i = 0; i < VALUES; i++) {
+    if (possible[pair[0]][pair[1]][i] == 1) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+
+/* --- UNIQUE FINDERS --- */
 
 // Gets pair of row and col that is only place for a possible value in a row
 // (968 found in 1 million)
@@ -486,15 +515,8 @@ int* unique_in_range(int mode, int* value) {
   return NULL;
 }
 
-// Assumes there is only one value in the bitmap and retrieves it
-int get_possible_value(int* pair) {
-  for (int i = 0; i < VALUES; i++) {
-    if (possible[pair[0]][pair[1]][i] == 1) {
-      return i + 1;
-    }
-  }
-  return -1;
-}
+
+/* --- REMOVERS --- */
 
 // Removes a value from the possibilities of all others in the same row
 void remove_value_from_row(int* pair, int value) {
@@ -541,49 +563,8 @@ void remove_value_from_subgrid(int* pair, int value) {
   }
 }
 
-// Prints a grid cell's possible contents
-void print_array(int* array, int len, int isPadded) {
-  printf("{");
-  int count = 0;
-  for (int i = 0; i < len; i++) {
-    if (array[i] == 1) {
-      if (count == 0) {
-        printf("%s", valid[i + 1]);
-        count += 1;
-      } else {
-        printf(" %s", valid[i + 1]);
-        count += 2;
-      }
-    }
-  }
-  printf("}");
-  // Prints appropriate padding for formatted output
-  if (isPadded) {
-    count += 2;
-    for (; count < PAD_SIZE; count++) {
-      printf(" ");
-    }
-  }
-}
 
-// Prints all possible values for each cell in the grid (FOR TESTING)
-void print_possible() {
-  printf("\n_________________________\n"); // Top
-  for (int row = 0; row < VALUES; row++) {
-    if (row % SUB_SIZE == 0 && row != 0) {
-      printf("-------------------------\n"); // Row sectioner
-    }
-    printf("| "); // Left
-    for (int col = 0; col < VALUES; col++) {
-      print_array(possible[row][col], VALUES, 1);
-      if ((col + 1) % SUB_SIZE == 0) {
-        printf("| "); // Col sectioner and Right
-      }
-    }
-    printf("\n");
-  }
-  printf("_________________________\n\n"); // Bottom
-}
+/* --- CHECKERS [BRUTE FORCE] --- */
 
 // Checks if the value is valid (no duplicates) in the given row
 int valid_in_row(int value, int row) {
@@ -674,6 +655,9 @@ void brute_force(int verbosity) {
   }
 }
 
+
+/* --- PROCESS LOOP --- */
+
 // Process the next iteration of the loop
 int process_next(int* cellsLeft, int verbosity, int forceFlag) {
   if (*cellsLeft == 0) {
@@ -687,16 +671,20 @@ int process_next(int* cellsLeft, int verbosity, int forceFlag) {
         break; // If found, stop checking
       }
     }
+    // If still no pair then use ommision and disjoint subsets to reduce possibilities and try again.
+    // eliminate_redundant();
+    // pair = find_single();
     if (pair == NULL) { // If there still is not pair found then try brute force
       if (verbosity > 0 && forceFlag == -1) {
         fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
       }
-      if (forceFlag != -1) { // If brute force not disabled
+      if (forceFlag != -1) { // If brute force not disabled, use it to finish
         brute_force(verbosity);
       }
       return 1;
     }
-  } else {
+  }
+  if (value == -1) { // Only for single, since unique in range sets appropriate value
     value = get_possible_value(pair);
   }
   if (value == -1) {
@@ -721,6 +709,53 @@ int process_next(int* cellsLeft, int verbosity, int forceFlag) {
   }
   free(pair);
   return 0;
+}
+
+
+/* --- PRINTERS --- */
+
+// Prints a grid cell's possible contents
+void print_array(int* array, int len, int isPadded) {
+  printf("{");
+  int count = 0;
+  for (int i = 0; i < len; i++) {
+    if (array[i] == 1) {
+      if (count == 0) {
+        printf("%s", valid[i + 1]);
+        count += 1;
+      } else {
+        printf(" %s", valid[i + 1]);
+        count += 2;
+      }
+    }
+  }
+  printf("}");
+  // Prints appropriate padding for formatted output
+  if (isPadded) {
+    count += 2;
+    for (; count < PAD_SIZE; count++) {
+      printf(" ");
+    }
+  }
+}
+
+// Prints all possible values for each cell in the grid (FOR TESTING)
+void print_possible() {
+  printf("Possible:\n_________________________\n"); // Top
+  for (int row = 0; row < VALUES; row++) {
+    if (row % SUB_SIZE == 0 && row != 0) {
+      printf("-------------------------\n"); // Row sectioner
+    }
+    printf("| "); // Left
+    for (int col = 0; col < VALUES; col++) {
+      print_array(possible[row][col], VALUES, 1);
+      if ((col + 1) % SUB_SIZE == 0) {
+        printf("| "); // Col sectioner and Right
+      }
+    }
+    printf("\n");
+  }
+  printf("_________________________\n\n"); // Bottom
 }
 
 // Prints a line of given length with a given character
@@ -752,6 +787,9 @@ void print_grid() {
   print_line('_', LINE_LENGTH);
   printf("\n"); // Bottom
 }
+
+
+/* --- EXPORTERS --- */
 
 // Writes the contents of the grid to a file in csv format
 void write_to_file(FILE* output) {
@@ -792,6 +830,7 @@ int export_grid(char* outCsv) {
   fclose(output);
   return 0;
 }
+
 
 // Reads, solves and checks all sudokus in a bulk sudoku file with the initial
 // and solution grid stored as VALUES^2 character strings (so it is dependant on
@@ -920,10 +959,11 @@ int main(int argc, char* argv[]) {
   int bulkFlag = 0; // [0, 1]
   int timeFlag = 0; // [0, 1]
   int forceFlag = 0; // [-1, 0, 1]
-  if (process_arguments(argc, argv, &verbosity, &bulkFlag,
-      &timeFlag, &forceFlag, &inCsv, &outCsv, &missing) != 0) {
+  int debugFlag = 0; // [0, 1]
+  if (process_arguments(argc, argv, &verbosity, &bulkFlag, &timeFlag,
+      &forceFlag, &debugFlag, &inCsv, &outCsv, &missing) != 0) {
     fprintf(stderr, "\nUsage: ./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]]"
-                    "[-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
+                    " [-d] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
                     "\nOptions:\n"
                     " -v verbose output, lists steps in solving\n"
                     " -vv extra verbose output, lists brute force steps\n"
@@ -931,8 +971,9 @@ int main(int argc, char* argv[]) {
                     " -t shows the benchmarked time for reading and execution\n"
                     " -f uses brute force for solving immediately\n"
                     " -nf disables use of brute force\n"
+                    " -d debug mode, shows all possibilities for each cell\n"
                     " -o exports solved grid to a new csv\n"
-                    " -m provide missing argument if not in the grid");
+                    " -m provide missing argument if not in the grid\n");
     return 1;
   }
 
@@ -976,6 +1017,9 @@ int main(int argc, char* argv[]) {
   // Display solution
   printf("\nOutput:");
   print_grid();
+  if (debugFlag == 1) {
+    print_possible();
+  }
   if (outCsv != NULL) { // If output set, export
     if (export_grid(outCsv) != 0) {
       free_globals();
