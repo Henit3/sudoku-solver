@@ -403,7 +403,7 @@ int* find_single() {
 int get_possible_value(int* pair) {
   for (int i = 0; i < VALUES; i++) {
     if (possible[pair[0]][pair[1]][i] == 1) {
-      return i + 1;
+      return i;
     }
   }
   return -1;
@@ -430,7 +430,7 @@ int* unique_in_row(int* value) {
     // Go through all values and see if frequency is 1, if so, output it
     for (int val = 0; val < VALUES; val++) {
       if (checkArray[val][0] == 1) {
-        *value = val + 1;
+        *value = val;
         return make_pair(row, checkArray[val][1]);
       }
     }
@@ -456,7 +456,7 @@ int* unique_in_col(int* value) {
     // Go through all values and see if frequency is 1, if so, output it
     for (int val = 0; val < VALUES; val++) {
       if (checkArray[val][0] == 1) {
-        *value = val + 1;
+        *value = val;
         return make_pair(checkArray[val][1], col);
       }
     }
@@ -488,7 +488,7 @@ int* unique_in_subgrid(int* value) {
       // Go through all values and see if frequency is 1, if so, output it
       for (int val = 0; val < VALUES; val++) {
         if (checkArray[val][0] == 1) {
-          *value = val + 1;
+          *value = val;
           int pairRow = (row * SUB_SIZE) + (checkArray[val][1] / SUB_SIZE);
           int pairCol = (col * SUB_SIZE) + (checkArray[val][1] % SUB_SIZE);
           return make_pair(pairRow, pairCol);
@@ -517,45 +517,43 @@ int* unique_in_range(int mode, int* value) {
 
 
 /* --- REMOVERS --- */
+// Ignore values in the mask that have been set
 
 // Removes a value from the possibilities of all others in the same row
-// Ignores values in the mask that have been set, takes value + 1
 void remove_value_from_row(int row, int value, int mask[VALUES], int print) {
   for (int col = 0; col < VALUES; col++) {
     if (mask[col] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
-    if (possible[row][col][value - 1] == 1) {
-      possible[row][col][value - 1] = 0;
+    if (possible[row][col][value] == 1) {
+      possible[row][col][value] = 0;
       possibleCount[row][col] -= 1;
       if (print > 0) {
-        printf("Eliminated: %s at (%i, %i)\n", valid[value], row, col);
+        printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], row, col);
       }
     }
   }
 }
 
 // Removes a value from the possibilities of all others in the same column
-// Ignores values in the mask that have been set, takes value + 1
 void remove_value_from_column(int col, int value, int mask[VALUES], int print) {
   for (int row = 0; row < VALUES; row++) {
     if (mask[row] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
-    if (possible[row][col][value - 1] == 1) {
-      possible[row][col][value - 1] = 0;
+    if (possible[row][col][value] == 1) {
+      possible[row][col][value] = 0;
       possibleCount[row][col] -= 1;
       if (print > 0) {
-        printf("Eliminated: %s at (%i, %i)\n", valid[value], row, col);
+        printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], row, col);
       }
     }
   }
 }
 
 // Removes a value from the possibilities of all others in the same subGrid
-// Ignores values in the mask that have been set, takes value + 1
 void remove_value_from_subgrid(int row, int col, int value, int mask[VALUES], int print) {
   int subRow = (row / SUB_SIZE) * SUB_SIZE;
   int subCol = (col / SUB_SIZE) * SUB_SIZE;
@@ -565,11 +563,11 @@ void remove_value_from_subgrid(int row, int col, int value, int mask[VALUES], in
     if (mask[i] == 1 || (inCol + subCol == col && inRow + subRow == row)) {
       continue;
     }
-    if (possible[subRow + inRow][subCol + inCol][value - 1] == 1) {
-      possible[subRow + inRow][subCol + inCol][value - 1] = 0;
+    if (possible[subRow + inRow][subCol + inCol][value] == 1) {
+      possible[subRow + inRow][subCol + inCol][value] = 0;
       possibleCount[subRow + inRow][subCol + inCol] -= 1;
       if (print > 0) {
-        printf("Eliminated: %s at (%i, %i)\n", valid[value], subRow + inRow, subCol + inCol);
+        printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], subRow + inRow, subCol + inCol);
       }
     }
   }
@@ -714,6 +712,7 @@ void print_possible() {
 
 /* --- REDUNDANCY REMOVERS --- */
 
+// Checks if possible locations of a value lie on a single overlapping region, returning it
 int focus_region(int region_bm[SUB_SIZE]) {
   int focus = -1;
   for (int i = 0; i < SUB_SIZE; i++) {
@@ -839,117 +838,258 @@ void ommision(int verbosity) {
   }
 }
 
-// Compares the possibilities of both cells with the assumption they are pairs
-int has_same_possibilities(int possibleA[VALUES], int possibleB[VALUES],
-                          int shared[2]) {
-  int valuesFound = 0;
-  for (int i = 0; i < VALUES; i++) {
-    if (possibleA[i] == 1) {
-      shared[valuesFound] = i;
-      valuesFound++;
-      if (valuesFound == 2) {
-        return 1;
-      }
-    }
-    if (possibleA[i] != possibleB[i]) {
-      return 0;
-    }
-  }
-  return 1;
-}
-
-// Make better by passing in pairs
-void remove_naked_pair(int rowA, int colA, int rowB, int colB, int shared[2],
+// Removes values according to the contents of a known naked group
+void remove_naked_group(int* rows, int* cols, int* shared, int cells,
                       int mode, int verbosity) {
   if (verbosity > 0) {
-    printf("Found naked pair (%s, %s) at (%i, %i), (%i, %i)\n",
-      valid[shared[0] + 1], valid[shared[1] + 1], rowA, colA, rowB, colB);
+    char* MODE_LABELS[] = {"rows", "cols", "subgrids"};
+    printf("Found naked group using %s (", MODE_LABELS[mode]);
+    for (int i = 0; i < cells - 1; i++) {
+      printf("%s, ", valid[shared[i] + 1]);
+    }
+    printf("%s) at ", valid[shared[cells - 1] + 1]);
+    for (int i = 0; i < cells; i++) {
+      printf("(%i, %i) ", rows[i], cols[i]);
+    }
+    printf("\n");
   }
+
   int mask[VALUES];
   memset(mask, 0, sizeof(mask));
   switch (mode) {
     case 0: { // ROW
-      mask[colA] = 1;
-      mask[colB] = 1;
+      // Apply mask to all columns
+      for (int i = 0; i < cells; i++) {
+        mask[cols[i]] = 1;
+      }
       for (int i = 0; i < 2; i++) {
-        if (verbosity > 0) {
-          printf("Using naked pairs (row): ");
-        }
-        remove_value_from_row(rowA, shared[i] + 1, mask, verbosity);
+        remove_value_from_row(rows[i], shared[i], mask, verbosity);
       }
       break;
     }
     case 1: { // COL
-      mask[rowA] = 1;
-      mask[rowB] = 1;
+      // Apply mask to all rows
+      for (int i = 0; i < cells; i++) {
+        mask[rows[i]] = 1;
+      }
       for (int i = 0; i < 2; i++) {
-        if (verbosity > 0) {
-          printf("Using naked pairs (col): ");
-        }
-        remove_value_from_column(colA, shared[i] + 1, mask, verbosity);
+        remove_value_from_column(cols[i], shared[i], mask, verbosity);
       }
       break;
     }
     case 2: { // SUBGRID (same one)
-      mask[SUB_SIZE * (rowB % SUB_SIZE) + colB % SUB_SIZE] = 1;
+      // Apply mask to all positions
+      for (int i = 0; i < cells; i++) {
+        mask[SUB_SIZE * (rows[i] % SUB_SIZE) + cols[i] % SUB_SIZE] = 1;
+      }
       for (int i = 0; i < 2; i++) {
-        if (verbosity > 0) {
-          printf("Using naked pairs (subGrid): ");
-        }
-        remove_value_from_subgrid(rowA, colA, shared[i] + 1, mask, verbosity);
+        remove_value_from_subgrid(rows[i], cols[i], shared[i], mask, verbosity);
       }
       break;
     }
     default: {
-      fprintf(stderr, "Invalid mode for removing naked pairs.");
+      fprintf(stderr, "Invalid mode for removing naked group.");
       exit(1);
     }
   }
-  print_possible();
 }
 
-// Loop through all regions and find 2 cells with only identical pair, remove from all other linked regions
-void naked_pairs(int verbosity) {
-  if (verbosity > 0) {
-    printf("Finding naked pairs...\n");
-  }
-  // ROW
-  for (int row = 0; row < VALUES; row++) {
-    // If there are two or more cells with possibleCount 2, then consider them
-    int count = 0;
-    int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
-    memset(considered, 0, sizeof(considered));
-    for (int col = 0; col < VALUES; col++) {
-      if (possibleCount[row][col] == 2) {
-        count++;
-        considered[col] = 1;
-      }
-    }
-    // If these contain the same pair, then we found a hidden pair
-    for (int colA = 0; colA < VALUES; colA++) {
-      if (considered[colA] == 0) {
-        continue;
-      }
-      for (int colB = colA + 1; colB < VALUES; colB++) {
-        if (considered[colB] == 0) {
-          continue;
+// Evaluates a naked group by checking validity and using to remove redundancy
+void eval_naked_group(int* candidates, int size, int pos, int mode, int verbosity) {
+  // Loop through candidates to obtain shared values
+  int pre_shared[VALUES];
+  memset(pre_shared, 0, sizeof(pre_shared));
+  switch (mode) {
+    case 0: { // ROW
+      for (int i = 0; i < size; i++) {
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[pos][candidates[i]][value] == 1) {
+            pre_shared[value] += 1;
+          }
         }
-        int shared[2];
-        if (has_same_possibilities(possible[row][colB], possible[row][colA], shared) == 1) {
-          // Naked pair found, time to remove these from everywhere else
-          remove_naked_pair(row, colA, row, colB, shared, 0, verbosity);
-          if (colA / SUB_SIZE == colB / SUB_SIZE) {
-            remove_naked_pair(row, colA, row, colB, shared, 2, verbosity);
+      }
+      break;
+    }
+    case 1: { // COL
+      for (int i = 0; i < size; i++) {
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[candidates[i]][pos][value] == 1) {
+            pre_shared[value] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 2: { // SUBGRID
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[subRow + (candidates[i] / SUB_SIZE)][subRow + (candidates[i] / SUB_SIZE)][value] == 1) {
+            pre_shared[value] += 1;
           }
         }
       }
     }
   }
+
+  // Determine if valid naked group and collect shared values
+  int shared[size];
+  memset(shared, 0, sizeof(shared));
+  int shared_counter = 0;
+  for (int value = 0; value < VALUES; value++) {
+    if (pre_shared[value] > 0) {
+      if (shared_counter == size) {
+        return; // Too many values to be a naked_group
+      }
+      shared[shared_counter] = value;
+      shared_counter += 1;
+    }
+  }
+
+  int rows[size];
+  int cols[size];
+  memset(rows, 0, sizeof(rows));
+  memset(cols, 0, sizeof(cols));
+  // Mode specific construction of rows and cols
+  switch (mode) {
+    case 0: { // Row
+      for (int i = 0; i < size; i++) { // All have same row
+        rows[i] = pos;
+        cols[i] = candidates[i];
+      }
+      break;
+    }
+    case 1: { // Col
+      for (int i = 0; i < size; i++) { // All have same col
+        rows[i] = candidates[i];
+        cols[i] = pos;
+      }
+      break;
+    }
+    case 2: { // Subgrid
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        rows[i] = subRow + (candidates[i] / SUB_SIZE);
+        cols[i] = subCol + (candidates[i] % SUB_SIZE);
+      }
+      break;
+    }
+  }
+
+  remove_naked_group(rows, cols, shared, size, mode, verbosity);
+
+  // Additional shared groups if any
+  int sharedValue = -1;
+  int sharesGroup = 1;
+  if (mode < 2) {
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = candidates[i] / SUB_SIZE;
+      } else if (sharedValue != candidates[i] / SUB_SIZE) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      remove_naked_group(rows, cols, shared, size, 2, verbosity);
+    }
+  } else {
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = rows[i];
+      } else if (sharedValue != rows[i]) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      remove_naked_group(rows, cols, shared, size, 0, verbosity);
+    }
+
+    sharedValue = -1;
+    sharesGroup = 1;
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = cols[i];
+      } else if (sharedValue != cols[i]) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      remove_naked_group(rows, cols, shared, size, 1, verbosity);
+    }
+  }
+}
+
+// OPTIMIZATION: only last candidate_size - cur_size are evaluated
+// must count up and pass candidates_parsed as parameter to allow this
+
+// Recursive function to create groups of candidate numbers to be evaluated as naked groups of the given size
+void candid_naked_group(int considered[VALUES], int cur_index, int og_size, int cur_size,
+                        int* candidates, int pos, int mode, int verbosity) {
+  if (cur_size == og_size) {
+    eval_naked_group(candidates, og_size, pos, mode, verbosity);
+    return;
+  }
+  // use cur_index and candidates to get next cur_index
+  int next_index;
+  do {
+    next_index = -1;
+    for (int i = cur_index + 1; i < VALUES; i++) {
+      if (considered[i] == 1) {
+        next_index = i;
+        break;
+      }
+    }
+    // if valid index, then recurse further
+    if (next_index != -1) {
+      candidates[cur_size] = next_index;
+      candid_naked_group(considered, next_index, og_size, cur_size + 1, candidates, pos, mode, verbosity);
+      // update cur_index to allow next value to be considered
+      cur_index = next_index;
+    }
+  } while (next_index != -1);
+  // if invalid index, then return (candidates only used after full assignment)
+}
+
+// Wrapper function for forming naked groups and evaluating them
+void find_naked_group(int considered[VALUES], int size, int pos, int mode, int verbosity) {
+  int candidates[size];
+  memset(candidates, 0, sizeof(candidates));
+  candid_naked_group(considered, -1, size, 0, candidates, pos, mode, verbosity);
+}
+
+// Loop through all regions and find cells containing same group of values, remove from all other linked regions
+void naked_groups(int size, int verbosity) {
+  if (verbosity > 0) {
+    printf("Finding naked groups...\n");
+  }
+
+  // If there are two or more cells with possibleCount 2, then consider them
+  int count = 0;
+  int considered[VALUES];
+
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    count = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int col = 0; col < VALUES; col++) {
+      if (possibleCount[row][col] >= 2 && possibleCount[row][col] <= size) {
+        count++;
+        considered[col] = 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked_groups
+    if (count >= size) {
+      find_naked_group(considered, size, row, 0, verbosity);
+    }
+  }
   // COL
   for (int col = 0; col < VALUES; col++) {
-    // If there are two or more cells with possibleCount 2, then consider them
-    int count = 0;
-    int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
+    count = 0;
     memset(considered, 0, sizeof(considered));
     for (int row = 0; row < VALUES; row++) {
       if (possibleCount[row][col] == 2) {
@@ -957,32 +1097,15 @@ void naked_pairs(int verbosity) {
         considered[row] = 1;
       }
     }
-    // If these contain the same pair, then we found a hidden pair
-    for (int rowA = 0; rowA < VALUES; rowA++) {
-      if (considered[rowA] == 0) {
-        continue;
-      }
-      for (int rowB = rowA + 1; rowB < VALUES; rowB++) {
-        if (considered[rowB] == 0) {
-          continue;
-        }
-        int shared[2];
-        if (has_same_possibilities(possible[rowA][col], possible[rowB][col], shared) == 1) {
-          // Naked pair found, time to remove these from everywhere else
-          remove_naked_pair(rowA, col, rowB, col, shared, 1, verbosity);
-          if (rowA / SUB_SIZE == rowB / SUB_SIZE) {
-            remove_naked_pair(rowA, col, rowB, col, shared, 2, verbosity);
-          }
-        }
-      }
+    // If we consider enough cells, begin to find naked_groups
+    if (count >= size) {
+      find_naked_group(considered, size, col, 1, verbosity);
     }
   }
   // SUBGRID
   for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
     for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
-      // If there are two or more cells with possibleCount 2, then consider them
-      int count = 0;
-      int considered[VALUES]; // Faster to use dynamic allocation to extend a list?
+      count = 0;
       memset(considered, 0, sizeof(considered));
       for (int pos = 0; pos < VALUES; pos++) {
         if (possibleCount[subRow * SUB_SIZE + pos / SUB_SIZE][subCol * SUB_SIZE + pos % SUB_SIZE] == 2) {
@@ -990,25 +1113,9 @@ void naked_pairs(int verbosity) {
           considered[pos] = 1;
         }
       }
-      // If these contain the same pair, then we found a hidden pair
-      for (int posA = 0; posA < VALUES; posA++) {
-        if (considered[posA] == 0) {
-          continue;
-        }
-        for (int posB = posA + 1; posB < VALUES; posB++) {
-          if (considered[posB] == 0) {
-            continue;
-          }
-          int shared[2];
-          int rowA = subRow * SUB_SIZE + posA / SUB_SIZE;
-          int colA = subCol * SUB_SIZE + posA % SUB_SIZE;
-          int rowB = subRow * SUB_SIZE + posB / SUB_SIZE;
-          int colB = subCol * SUB_SIZE + posB % SUB_SIZE;
-          if (has_same_possibilities(possible[rowA][colA], possible[rowB][colB], shared) == 1) {
-            // Naked pair found, time to remove these from everywhere else
-            remove_naked_pair(rowA, colA, rowB, colB, shared, 2, verbosity);
-          }
-        }
+      // If we consider enough cells, begin to find naked_groups
+      if (count >= size) {
+        find_naked_group(considered, size, (subRow * SUB_SIZE) + subCol, 2, verbosity);
       }
     }
   }
@@ -1018,12 +1125,13 @@ void hidden_pairs() {
   // Loop through all regions and find 2 cells with pair that only appear there, remove other values from those cells
 }
 
+// Elminates redundant possibilities using the techniques the solver knows
 void eliminate_redundant(int verbosity) {
   if (verbosity > 0) {
     printf("Removing redundant values...\n");
   }
   ommision(verbosity);
-  naked_pairs(verbosity);
+  naked_groups(2, verbosity);
   // hidden_pairs();
 }
 
@@ -1039,7 +1147,7 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   int* pair = find_single(); // Find cell with only one left
   if (pair == NULL) { // If not found, try other methods
     for (int mode = 0; mode < 3; mode++) { // Loop through row, col, subGrid
-      if ((pair = unique_in_range(mode, &value)) != NULL) {
+      if ((pair = unique_in_range(mode, &value)) != NULL) { // POSSIBLE value
         break; // If found, stop checking
       }
     }
@@ -1061,7 +1169,7 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
     }
   }
   if (value == -1) { // Only for single, since unique in range sets appropriate value
-    value = get_possible_value(pair);
+    value = get_possible_value(pair); // POSSIBLE value
   }
   if (value == -1) {
     fprintf(stderr, "Empty cell processed\n");
@@ -1069,7 +1177,8 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   }
 
   *stripped = 0;
-  grid[pair[0]][pair[1]] = valid[value];
+  grid[pair[0]][pair[1]] = valid[value + 1];
+  // Clear filled cell of all possibilities
   for (int val = 0; val < VALUES; val++) {
     possible[pair[0]][pair[1]][val] = 0;
   }
@@ -1088,7 +1197,7 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
 
   // Show affected
   if (verbosity > 0) {
-    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
+    printf("Added %s at (%i, %i)\n", valid[value + 1], pair[0], pair[1]);
   }
   free(pair);
   return 0;
