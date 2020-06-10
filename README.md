@@ -27,9 +27,10 @@ When operating under deduction mode (the default setting), it is capable of list
 performed to arrive at the solution that a human can follow on and understand why the step
 generates a valid value (using the `-v` option). It utilizes conventional deduction techniques,
 such as locating cells that may hold only one possible value, finding the only position available
-for a value in a region (row, column or subgrid), and using more advanced techniques such as
-omission and naked pairs to restrict values to certain positions, until it cannot carry on processing
-safely using these rules (resorting to brute force mode) or until it has produced a complete grid.
+for a value in a house (row, column or box), and using more advanced techniques such as
+omission and disjoint subsets (hidden and naked pairs/triplets/quads) to restrict values to certain
+positions, until it cannot carry on processing safely using these rules (resorting to brute force
+mode) or until it has produced a complete grid.
 
 Operation under the brute force mode will execute a mindless recursive backtracking algorithm
 where values are tried in each cell, reverting to a previous point if the current cell has
