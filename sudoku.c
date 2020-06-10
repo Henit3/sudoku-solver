@@ -711,6 +711,70 @@ void intersection_removal(int verbosity) {
   if (verbosity > 0) {
     printf(PROCESS "Using pointing groups...\n");
   }
+  // SUBGRID
+  int rowBM[SUB_SIZE];
+  int colBM[SUB_SIZE];
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      for (int value = 1; value <= VALUES; value++) {
+        memset(rowBM, 0, sizeof(rowBM));
+        memset(colBM, 0, sizeof(colBM));
+        for (int pos = 0; pos < VALUES; pos++) {
+          int curRow = subRow * SUB_SIZE + (pos / SUB_SIZE);
+          int curCol = subCol * SUB_SIZE + (pos % SUB_SIZE);
+          if (possible[curRow][curCol][value] == 1) {
+            rowBM[pos / SUB_SIZE] = 1;
+            colBM[pos % SUB_SIZE] = 1;
+          }
+        }
+        int focus = focus_house(rowBM);
+        if (focus != -1) { // Row Ommision by Box (specialize REMOVERS)
+          int printed = 0;
+          int curRow = subRow * SUB_SIZE + focus;
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same box but on the row
+            if (i / SUB_SIZE != subCol && possible[curRow][i][value] == 1) {
+              possible[curRow][i][value] = 0;
+              possibleCount[curRow][i] -= 1;
+              if (verbosity > 0) {
+                if (printed == 0) {
+                  printf(FOUND "Using pointing groups on %s to remove from"
+                    " the box's %ith row:\n", valid[value + 1], focus);
+                  printed = 1;
+                }
+                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                  valid[value + 1], curRow, i);
+              }
+            }
+          }
+        }
+        focus = focus_house(colBM);
+        if (focus != -1) { // Col Ommision by Box (specialize REMOVERS)
+          int printed = 0;
+          int curCol = subCol * SUB_SIZE + focus;
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same box but on the col
+            if (i / SUB_SIZE != subRow && possible[i][curCol][value] == 1) {
+              possible[i][curCol][value] = 0;
+              possibleCount[i][curCol] -= 1;
+              if (verbosity > 0) {
+                if (printed == 0) {
+                  printf(FOUND "Using pointing groups on %s to remove from"
+                    " the box's %ith column:\n", valid[value + 1], focus);
+                  printed = 1;
+                }
+                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                  valid[value + 1], i, curCol);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (verbosity > 0) {
+    printf(PROCESS "Using box line reduction...\n");
+  }
   int houseBM[SUB_SIZE];
   // ROW
   for (int row = 0; row < VALUES; row++) {
@@ -723,6 +787,7 @@ void intersection_removal(int verbosity) {
       }
       int focus = focus_house(houseBM); // Box for the row
       if (focus != -1) { // Box Ommision by Row (specialize REMOVERS)
+        int printed = 0;
         int subRow = (row / SUB_SIZE) * SUB_SIZE;
         int subCol = focus * SUB_SIZE;
         for (int pos = 0; pos < VALUES; pos++) {
@@ -733,8 +798,11 @@ void intersection_removal(int verbosity) {
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
-              printf(FOUND "Using pointing groups on %s using row to remove"
-                " from its %ith box:\n", valid[value + 1], focus);
+              if (printed == 0) {
+                printf(FOUND "Using box line reduction to remove %s from the"
+                  " box except its %ith row:\n", valid[value + 1], focus);
+                printed = 1;
+              }
               printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                 valid[value + 1], curRow, curCol);
             }
@@ -754,6 +822,7 @@ void intersection_removal(int verbosity) {
       }
       int focus = focus_house(houseBM); // Box for the row
       if (focus != -1) { // Box Ommision by Row (specialize REMOVERS)
+        int printed = 0;
         int subRow = focus * SUB_SIZE;
         int subCol = (col / SUB_SIZE) * SUB_SIZE;
         for (int pos = 0; pos < VALUES; pos++) {
@@ -764,66 +833,13 @@ void intersection_removal(int verbosity) {
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
-              printf(FOUND "Using pointing groups on %s using column to remove"
-                " from its %ith box:\n", valid[value + 1], focus);
+              if (printed == 0) {
+                printf(FOUND "Using box line reduction to remove %s from the"
+                  " box except its %ith column:\n", valid[value + 1], focus);
+                printed = 1;
+              }
               printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                 valid[value + 1], curRow, curCol);
-            }
-          }
-        }
-      }
-    }
-  }
-  if (verbosity > 0) {
-    printf(PROCESS "Using box line reduction...\n");
-  }
-  // SUBGRID
-  int rowBM[SUB_SIZE];
-  int colBM[SUB_SIZE];
-  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
-    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
-      for (int value = 1; value <= VALUES; value++) {
-        memset(rowBM, 0, sizeof(rowBM));
-        memset(colBM, 0, sizeof(colBM));
-        for (int pos = 0; pos < VALUES; pos++) {
-          int curRow = subRow * SUB_SIZE + (pos / SUB_SIZE);
-          int curCol = subCol * SUB_SIZE + (pos % SUB_SIZE);
-          if (possible[curRow][curCol][value] == 1) {
-            rowBM[pos / SUB_SIZE] = 1;
-            colBM[pos % SUB_SIZE] = 1;
-          }
-        }
-        int focus = focus_house(rowBM);
-        if (focus != -1) { // Row Ommision by Box (specialize REMOVERS)
-        int curRow = subRow * SUB_SIZE + focus;
-          for (int i = 0; i < VALUES; i++) {
-            // Not the same box but on the row
-            if (i / SUB_SIZE != subCol && possible[curRow][i][value] == 1) {
-              possible[curRow][i][value] = 0;
-              possibleCount[curRow][i] -= 1;
-              if (verbosity > 0) {
-                printf(FOUND "Using box line reduction on %s using box to"
-                  " remove from its %ith row:\n", valid[value + 1], focus);
-                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
-                  valid[value + 1], curRow, i);
-              }
-            }
-          }
-        }
-        focus = focus_house(colBM);
-        if (focus != -1) { // Col Ommision by Box (specialize REMOVERS)
-        int curCol = subCol * SUB_SIZE + focus;
-          for (int i = 0; i < VALUES; i++) {
-            // Not the same box but on the col
-            if (i / SUB_SIZE != subRow && possible[i][curCol][value] == 1) {
-              possible[i][curCol][value] = 0;
-              possibleCount[i][curCol] -= 1;
-              if (verbosity > 0) {
-                printf(FOUND "Using box line reduction on %s using box to"
-                  " remove from its %ith column:\n", valid[value + 1], focus);
-                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
-                  valid[value + 1], i, curCol);
-              }
             }
           }
         }
@@ -855,7 +871,7 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
       for (int i = 0; i < cells; i++) {
         mask[cols[i]] = 1;
       }
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < cells; i++) {
         remove_value_from_row(rows[i], shared[i], mask, verbosity);
       }
       break;
@@ -865,7 +881,7 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
       for (int i = 0; i < cells; i++) {
         mask[rows[i]] = 1;
       }
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < cells; i++) {
         remove_value_from_column(cols[i], shared[i], mask, verbosity);
       }
       break;
@@ -875,7 +891,7 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
       for (int i = 0; i < cells; i++) {
         mask[SUB_SIZE * (rows[i] % SUB_SIZE) + cols[i] % SUB_SIZE] = 1;
       }
-      for (int i = 0; i < 2; i++) {
+      for (int i = 0; i < cells; i++) {
         remove_value_from_box(rows[i], cols[i], shared[i], mask, verbosity);
       }
       break;
@@ -1378,10 +1394,10 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
       }
     }
     if (pair == NULL) { // If there still is not pair found then try brute force
-      if (*stripped == 0) {
+      if (*stripped < 2) {
         // If still no pair then remove redundant values, mark this, try again
         eliminate_redundant(verbosity);
-        *stripped = 1;
+        *stripped += 1;
         return 0;
       } else {
         if (verbosity > 0 && forceFlag == -1) {
