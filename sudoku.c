@@ -472,7 +472,7 @@ int* unique_in_col(int* value) {
 }
 
 // Gets pair of row and col that is only place for a possible value in a box
-// Not sure if ever needed so couldn't be tested (0 found in 1 million)
+// (Less than 1 found in 1 million)
 int* unique_in_box(int* value) {
   int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
   for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
@@ -486,7 +486,7 @@ int* unique_in_box(int* value) {
           for (int val = 0; val < VALUES; val++) {
             if (possible[curRow][curCol][val] == 1) {
               checkArray[val][0] += 1; // Increase the frequency of the val
-              int curIndex = curCol * SUB_SIZE + curRow;
+              int curIndex = curRow * SUB_SIZE + curCol;
               checkArray[val][1] = curIndex; // Set last found to curIndex
             }
           }
@@ -508,15 +508,27 @@ int* unique_in_box(int* value) {
 
 // Gets a pair of row and col which is the only possible location for a
 //  certain value in a house using other three "unique_in" functions
-int* unique_in_range(int mode, int* value) {
+int* unique_in_range(int mode, int* value, int verbosity) {
   int* output = NULL;
   if ((output = unique_in_row(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in row\n",
+        valid[*value + 1], output[0], output[1]);
+    }
     return output;
   }
   if ((output = unique_in_col(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in column\n",
+        valid[*value + 1], output[0], output[1]);
+    }
     return output;
   }
   if ((output = unique_in_box(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in box\n",
+        valid[*value + 1], output[0], output[1]);
+    }
     return output;
   }
   return NULL;
@@ -694,9 +706,10 @@ int focus_house(int houseBM[SUB_SIZE]) {
 }
 
 // Find value in only overlapping house and remove from rest of other houses
-void ommision(int verbosity) {
+// Aggregation of pointing groups and box line reduction techniques
+void intersection_removal(int verbosity) {
   if (verbosity > 0) {
-    printf(PROCESS "Using ommision...\n");
+    printf(PROCESS "Using pointing groups...\n");
   }
   int houseBM[SUB_SIZE];
   // ROW
@@ -720,8 +733,8 @@ void ommision(int verbosity) {
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
-              printf(FOUND "Using ommision on %s using row to remove"
-                "from its %ith box:\n", valid[value + 1], focus);
+              printf(FOUND "Using pointing groups on %s using row to remove"
+                " from its %ith box:\n", valid[value + 1], focus);
               printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                 valid[value + 1], curRow, curCol);
             }
@@ -751,8 +764,8 @@ void ommision(int verbosity) {
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
-              printf(FOUND "Using ommision on %s using column to remove"
-                "from its %ith box:\n", valid[value + 1], focus);
+              printf(FOUND "Using pointing groups on %s using column to remove"
+                " from its %ith box:\n", valid[value + 1], focus);
               printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                 valid[value + 1], curRow, curCol);
             }
@@ -760,6 +773,9 @@ void ommision(int verbosity) {
         }
       }
     }
+  }
+  if (verbosity > 0) {
+    printf(PROCESS "Using box line reduction...\n");
   }
   // SUBGRID
   int rowBM[SUB_SIZE];
@@ -786,8 +802,8 @@ void ommision(int verbosity) {
               possible[curRow][i][value] = 0;
               possibleCount[curRow][i] -= 1;
               if (verbosity > 0) {
-                printf(FOUND "Using ommision on %s using box to remove"
-                  "from its %ith column:\n", valid[value + 1], focus);
+                printf(FOUND "Using box line reduction on %s using box to"
+                  " remove from its %ith row:\n", valid[value + 1], focus);
                 printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                   valid[value + 1], curRow, i);
               }
@@ -803,8 +819,8 @@ void ommision(int verbosity) {
               possible[i][curCol][value] = 0;
               possibleCount[i][curCol] -= 1;
               if (verbosity > 0) {
-                printf(FOUND "Using ommision on %s using box to remove"
-                  "from its %ith column:\n", valid[value + 1], focus);
+                printf(FOUND "Using box line reduction on %s using box to"
+                  " remove from its %ith column:\n", valid[value + 1], focus);
                 printf(REMOVE "Eliminated: %s at (%i, %i)\n",
                   valid[value + 1], i, curCol);
               }
@@ -1338,11 +1354,11 @@ void eliminate_redundant(int verbosity) {
   if (verbosity > 0) {
     printf(PROCESS "Removing redundant values...\n");
   }
-  ommision(verbosity);
   for (int size = 2; size <= 4; size++) {
     naked_groups(size, verbosity);
     hidden_groups(size, verbosity);
   }
+  intersection_removal(verbosity);
 }
 
 
@@ -1357,7 +1373,7 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   int* pair = find_single(); // Find cell with only one left
   if (pair == NULL) { // If not found, try other methods
     for (int mode = 0; mode < 3; mode++) { // Loop through row, col, box
-      if ((pair = unique_in_range(mode, &value)) != NULL) {
+      if ((pair = unique_in_range(mode, &value, verbosity)) != NULL) {
         break; // If found, stop checking
       }
     }
@@ -1382,6 +1398,10 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   // Only for find_single, since unique in range sets appropriate value
   if (value == -1) {
     value = get_possible_value(pair);
+    if (verbosity > 0 && value != -1) {
+      printf(ADD "Added %s at (%i, %i) as single possibility\n",
+        valid[value + 1], pair[0], pair[1]);
+    }
   }
   if (value == -1) {
     fprintf(stderr, "Empty cell processed\n");
@@ -1407,10 +1427,6 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
   mask[pair[0]] = 0;
   remove_value_from_box(pair[0], pair[1], value, mask, 0);
 
-  // Show affected
-  if (verbosity > 0) {
-    printf(ADD "Added %s at (%i, %i)\n", valid[value + 1], pair[0], pair[1]);
-  }
   free(pair);
   return 0;
 }
