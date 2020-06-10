@@ -726,6 +726,7 @@ int focus_region(int region_bm[SUB_SIZE]) {
   return focus;
 }
 
+// TODO: Standardise print output with other removers
 // Find value in only overlapping region and remove from rest of other region
 void ommision(int verbosity) {
   if (verbosity > 0) {
@@ -843,11 +844,11 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
                       int mode, int verbosity) {
   if (verbosity > 0) {
     char* MODE_LABELS[] = {"rows", "cols", "subgrids"};
-    printf("Found naked group using %s (", MODE_LABELS[mode]);
+    printf("Found naked group (");
     for (int i = 0; i < cells - 1; i++) {
       printf("%s, ", valid[shared[i] + 1]);
     }
-    printf("%s) at ", valid[shared[cells - 1] + 1]);
+    printf("%s) using %s at ", valid[shared[cells - 1] + 1], MODE_LABELS[mode]);
     for (int i = 0; i < cells; i++) {
       printf("(%i, %i) ", rows[i], cols[i]);
     }
@@ -894,6 +895,48 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
   }
 }
 
+// Removes values according to the contents of a known hidden group
+void remove_hidden_group(int* rows, int* cols, int* shared, int cells,
+                      int mode, int verbosity) {
+  if (verbosity > 0) {
+    char* MODE_LABELS[] = {"rows", "cols", "subgrids"};
+    printf("Found hidden group (");
+    for (int i = 0; i < cells - 1; i++) {
+      printf("%s, ", valid[shared[i] + 1]);
+    }
+    printf("%s) using %s at ", valid[shared[cells - 1] + 1], MODE_LABELS[mode]);
+    for (int i = 0; i < cells; i++) {
+      printf("(%i, %i) ", rows[i], cols[i]);
+    }
+    printf("\n");
+  }
+
+  // Use shared as mask
+  for (int pos = 0; pos < cells; pos++) {
+    for (int value = 0; value < VALUES; value++) {
+      // Skip values in shared (use as mask)
+      int skip = 0;
+      for (int i = 0; i < cells; i++) {
+        if (value == shared[i]) {
+          skip = 1;
+          break;
+        }
+      }
+      if (skip == 1) {
+        continue;
+      }
+      // Remove possibility from cells
+      if (possible[rows[pos]][cols[pos]][value] == 1) {
+        possible[rows[pos]][cols[pos]][value] = 0;
+        possibleCount[rows[pos]][cols[pos]] -= 1;
+        if (verbosity > 0) {
+          printf("Eliminated: %s at (%i, %i)\n", valid[value + 1], rows[pos], cols[pos]);
+        }
+      }
+    }
+  }
+}
+
 // Evaluates a naked group by checking validity and using to remove redundancy
 void eval_naked_group(int* candidates, int size, int pos, int mode, int verbosity) {
   // Loop through candidates to obtain shared values
@@ -925,7 +968,7 @@ void eval_naked_group(int* candidates, int size, int pos, int mode, int verbosit
       int subCol = (pos % SUB_SIZE) * SUB_SIZE;
       for (int i = 0; i < size; i++) {
         for (int value = 0; value < VALUES; value++) {
-          if (possible[subRow + (candidates[i] / SUB_SIZE)][subRow + (candidates[i] / SUB_SIZE)][value] == 1) {
+          if (possible[subRow + (candidates[i] / SUB_SIZE)][subCol + (candidates[i] % SUB_SIZE)][value] == 1) {
             pre_shared[value] += 1;
           }
         }
@@ -1024,14 +1067,110 @@ void eval_naked_group(int* candidates, int size, int pos, int mode, int verbosit
   }
 }
 
+// TODO: Handle naked groups differently, since they are also hidden groups
+// Evaluates a hidden group by checking validity and using to remove redundancy
+void eval_hidden_group(int* candidates, int size, int pos, int mode, int verbosity) {
+  // Loop through candidates to obtain shared positions
+  int pre_shared[VALUES];
+  memset(pre_shared, 0, sizeof(pre_shared));
+  switch (mode) {
+    case 0: { // ROW
+      for (int i = 0; i < size; i++) { // value
+        for (int col = 0; col < VALUES; col++) {
+          if (possible[pos][col][candidates[i]] == 1) {
+            pre_shared[col] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 1: { // COL
+      for (int i = 0; i < size; i++) {
+        for (int row = 0; row < VALUES; row++) {
+          if (possible[row][pos][candidates[i]] == 1) {
+            pre_shared[row] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 2: { // SUBGRID
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        for (int inPos = 0; inPos < VALUES; inPos++) {
+          if (possible[subRow + (inPos / SUB_SIZE)][subCol + (inPos % SUB_SIZE)][candidates[i]] == 1) {
+            pre_shared[inPos] += 1;
+          }
+        }
+      }
+    }
+  }
+
+  // Determine if valid hidden group and collect shared positions
+  int shared[size];
+  memset(shared, 0, sizeof(shared));
+  int shared_counter = 0;
+  for (int position = 0; position < VALUES; position++) {
+    if (pre_shared[position] > 0) {
+      if (shared_counter == size) {
+        return; // Too many values to be a hidden_group
+      }
+      shared[shared_counter] = position;
+      shared_counter += 1;
+    }
+  }
+
+  if (shared_counter < size) {
+    return;
+  }
+
+  int rows[size];
+  int cols[size];
+  memset(rows, 0, sizeof(rows));
+  memset(cols, 0, sizeof(cols));
+  // Mode specific construction of rows and cols
+  switch (mode) {
+    case 0: { // Row
+      for (int i = 0; i < size; i++) { // All have same row
+        rows[i] = pos;
+        cols[i] = shared[i];
+      }
+      break;
+    }
+    case 1: { // Col
+      for (int i = 0; i < size; i++) { // All have same col
+        rows[i] = shared[i];
+        cols[i] = pos;
+      }
+      break;
+    }
+    case 2: { // Subgrid
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        rows[i] = subRow + (shared[i] / SUB_SIZE);
+        cols[i] = subCol + (shared[i] % SUB_SIZE);
+      }
+      break;
+    }
+  }
+
+  remove_hidden_group(rows, cols, candidates, size, mode, verbosity);
+}
+
 // OPTIMIZATION: only last candidate_size - cur_size are evaluated
 // must count up and pass candidates_parsed as parameter to allow this
 
-// Recursive function to create groups of candidate numbers to be evaluated as naked groups of the given size
-void candid_naked_group(int considered[VALUES], int cur_index, int og_size, int cur_size,
-                        int* candidates, int pos, int mode, int verbosity) {
+// Recursive function to create groups of candidate numbers to be evaluated as groups of the given size
+void candid_group(int considered[VALUES], int cur_index, int og_size, int cur_size,
+                        int* candidates, int pos, int mode, int verbosity, int isNaked) {
   if (cur_size == og_size) {
-    eval_naked_group(candidates, og_size, pos, mode, verbosity);
+    if (isNaked == 1) {
+      eval_naked_group(candidates, og_size, pos, mode, verbosity);
+    } else {
+      eval_hidden_group(candidates, og_size, pos, mode, verbosity);
+    }
     return;
   }
   // use cur_index and candidates to get next cur_index
@@ -1047,7 +1186,7 @@ void candid_naked_group(int considered[VALUES], int cur_index, int og_size, int 
     // if valid index, then recurse further
     if (next_index != -1) {
       candidates[cur_size] = next_index;
-      candid_naked_group(considered, next_index, og_size, cur_size + 1, candidates, pos, mode, verbosity);
+      candid_group(considered, next_index, og_size, cur_size + 1, candidates, pos, mode, verbosity, isNaked);
       // update cur_index to allow next value to be considered
       cur_index = next_index;
     }
@@ -1056,19 +1195,19 @@ void candid_naked_group(int considered[VALUES], int cur_index, int og_size, int 
 }
 
 // Wrapper function for forming naked groups and evaluating them
-void find_naked_group(int considered[VALUES], int size, int pos, int mode, int verbosity) {
+void find_group(int considered[VALUES], int size, int pos, int mode, int verbosity, int isNaked) {
   int candidates[size];
   memset(candidates, 0, sizeof(candidates));
-  candid_naked_group(considered, -1, size, 0, candidates, pos, mode, verbosity);
+  candid_group(considered, -1, size, 0, candidates, pos, mode, verbosity, isNaked);
 }
 
 // Loop through all regions and find cells containing same group of values, remove from all other linked regions
 void naked_groups(int size, int verbosity) {
   if (verbosity > 0) {
-    printf("Finding naked groups...\n");
+    printf("Finding naked groups of size %i...\n", size);
   }
 
-  // If there are two or more cells with possibleCount 2, then consider them
+  // If there are two or more cells with possibleCount between 2 & size, then consider them
   int count = 0;
   int considered[VALUES];
 
@@ -1084,7 +1223,7 @@ void naked_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked_groups
     if (count >= size) {
-      find_naked_group(considered, size, row, 0, verbosity);
+      find_group(considered, size, row, 0, verbosity, 1);
     }
   }
   // COL
@@ -1092,14 +1231,14 @@ void naked_groups(int size, int verbosity) {
     count = 0;
     memset(considered, 0, sizeof(considered));
     for (int row = 0; row < VALUES; row++) {
-      if (possibleCount[row][col] == 2) {
+      if (possibleCount[row][col] >= 2 && possibleCount[row][col] <= size) {
         count++;
         considered[row] = 1;
       }
     }
     // If we consider enough cells, begin to find naked_groups
     if (count >= size) {
-      find_naked_group(considered, size, col, 1, verbosity);
+      find_group(considered, size, col, 1, verbosity, 1);
     }
   }
   // SUBGRID
@@ -1108,21 +1247,96 @@ void naked_groups(int size, int verbosity) {
       count = 0;
       memset(considered, 0, sizeof(considered));
       for (int pos = 0; pos < VALUES; pos++) {
-        if (possibleCount[subRow * SUB_SIZE + pos / SUB_SIZE][subCol * SUB_SIZE + pos % SUB_SIZE] == 2) {
+        int possibilities = possibleCount[subRow * SUB_SIZE + pos / SUB_SIZE][subCol * SUB_SIZE + pos % SUB_SIZE];
+        if (possibilities >= 2 && possibilities <= size) {
           count++;
           considered[pos] = 1;
         }
       }
       // If we consider enough cells, begin to find naked_groups
       if (count >= size) {
-        find_naked_group(considered, size, (subRow * SUB_SIZE) + subCol, 2, verbosity);
+        find_group(considered, size, (subRow * SUB_SIZE) + subCol, 2, verbosity, 1);
       }
     }
   }
 }
 
-void hidden_pairs() {
-  // Loop through all regions and find 2 cells with pair that only appear there, remove other values from those cells
+// Loop through all regions and find 2 cells with pair that only appear there, remove other values from those cells
+void hidden_groups(int size, int verbosity) {
+  if (verbosity > 0) {
+    printf("Finding hidden groups of size %i...\n", size);
+  }
+
+  // If there are two or more values appearing between 2 & size, then consider them
+  int valueFrequency = 0;
+  int consideredCount = 0;
+  int considered[VALUES];
+
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    consideredCount = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int value = 0; value < VALUES; value++) {
+      valueFrequency = 0;
+      for (int col = 0; col < VALUES; col++) {
+        if (possible[row][col][value] == 1) {
+          valueFrequency++;
+        }
+      }
+      if (valueFrequency >= 2 && valueFrequency <= size) {
+        considered[value] = 1;
+        consideredCount += 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked_groups
+    if (valueFrequency >= size) {
+      find_group(considered, size, row, 0, verbosity, 0);
+    }
+  }
+  // COL
+  for (int col = 0; col < VALUES; col++) {
+    consideredCount = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int value = 0; value < VALUES; value++) {
+      valueFrequency = 0;
+      for (int row = 0; row < VALUES; row++) {
+        if (possible[row][col][value] == 1) {
+          valueFrequency++;
+        }
+      }
+      if (valueFrequency >= 2 && valueFrequency <= size) {
+        considered[value] = 1;
+        consideredCount += 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked_groups
+    if (valueFrequency >= size) {
+      find_group(considered, size, col, 1, verbosity, 0);
+    }
+  }
+  // SUBGRID
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      consideredCount = 0;
+      memset(considered, 0, sizeof(considered));
+      for (int value = 0; value < VALUES; value++) {
+        valueFrequency = 0;
+        for (int pos = 0; pos < VALUES; pos++) {
+          if (possible[subRow * SUB_SIZE + pos / SUB_SIZE][subCol * SUB_SIZE + pos % SUB_SIZE][value] == 1) {
+            valueFrequency++;
+          }
+        }
+        if (valueFrequency >= 2 && valueFrequency <= size) {
+          considered[value] = 1;
+          consideredCount += 1;
+        }
+      }
+      // If we consider enough cells, begin to find naked_groups
+      if (valueFrequency >= size) {
+        find_group(considered, size, (subRow * SUB_SIZE) + subCol, 2, verbosity, 0);
+      }
+    }
+  }
 }
 
 // Elminates redundant possibilities using the techniques the solver knows
@@ -1131,8 +1345,10 @@ void eliminate_redundant(int verbosity) {
     printf("Removing redundant values...\n");
   }
   ommision(verbosity);
-  naked_groups(2, verbosity);
-  // hidden_pairs();
+  for (int size = 2; size <= 4; size++) {
+    naked_groups(size, verbosity);
+    hidden_groups(size, verbosity);
+  }
 }
 
 
