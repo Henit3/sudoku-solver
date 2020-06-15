@@ -539,13 +539,15 @@ int* unique_in_range(int mode, int* value, int verbosity) {
 // Ignore values in the mask that have been set
 
 // Removes a value from the possibilities of all others in the same row
-void remove_value_from_row(int row, int value, int mask[VALUES], int print) {
+int remove_value_from_row(int row, int value, int mask[VALUES], int print) {
+  int output = 0;
   for (int col = 0; col < VALUES; col++) {
     if (mask[col] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
     if (possible[row][col][value] == 1) {
+      output = 1;
       possible[row][col][value] = 0;
       possibleCount[row][col] -= 1;
       if (print > 0) {
@@ -554,16 +556,19 @@ void remove_value_from_row(int row, int value, int mask[VALUES], int print) {
       }
     }
   }
+  return output;
 }
 
 // Removes a value from the possibilities of all others in the same column
-void remove_value_from_column(int col, int value, int mask[VALUES], int print) {
+int remove_value_from_column(int col, int value, int mask[VALUES], int print) {
+  int output = 0;
   for (int row = 0; row < VALUES; row++) {
     if (mask[row] == 1) {
       continue;
     }
     // Only if the value is in its possibilities
     if (possible[row][col][value] == 1) {
+      output = 1;
       possible[row][col][value] = 0;
       possibleCount[row][col] -= 1;
       if (print > 0) {
@@ -572,11 +577,13 @@ void remove_value_from_column(int col, int value, int mask[VALUES], int print) {
       }
     }
   }
+  return output;
 }
 
 // Removes a value from the possibilities of all others in the same box
-void remove_value_from_box(int row, int col, int value,
+int remove_value_from_box(int row, int col, int value,
     int mask[VALUES], int print) {
+  int output = 0;
   int subRow = (row / SUB_SIZE) * SUB_SIZE;
   int subCol = (col / SUB_SIZE) * SUB_SIZE;
   for (int i = 0; i < VALUES; i++) {
@@ -586,6 +593,7 @@ void remove_value_from_box(int row, int col, int value,
       continue;
     }
     if (possible[subRow + inRow][subCol + inCol][value] == 1) {
+      output = 1;
       possible[subRow + inRow][subCol + inCol][value] = 0;
       possibleCount[subRow + inRow][subCol + inCol] -= 1;
       if (print > 0) {
@@ -594,6 +602,7 @@ void remove_value_from_box(int row, int col, int value,
       }
     }
   }
+  return output;
 }
 
 
@@ -691,6 +700,15 @@ void brute_force(int verbosity) {
 
 /* --- REMOVEUNDANCY REMOVERS --- */
 
+// Returns the maximum of two integers
+int max(int a, int b) {
+  if (a >= b) {
+    return a;
+  } else {
+    return b;
+  }
+}
+
 // Returns overlapping house where possible locations of a value lie in
 int focus_house(int houseBM[SUB_SIZE]) {
   int focus = -1;
@@ -707,7 +725,8 @@ int focus_house(int houseBM[SUB_SIZE]) {
 
 // Find value in only overlapping house and remove from rest of other houses
 // Aggregation of pointing groups and box line reduction techniques
-void intersection_removal(int verbosity) {
+int intersection_removal(int verbosity) {
+  int output = 0;
   if (verbosity > 0) {
     printf(PROCESS "Using pointing groups...\n");
   }
@@ -734,6 +753,7 @@ void intersection_removal(int verbosity) {
           for (int i = 0; i < VALUES; i++) {
             // Not the same box but on the row
             if (i / SUB_SIZE != subCol && possible[curRow][i][value] == 1) {
+              output = 1;
               possible[curRow][i][value] = 0;
               possibleCount[curRow][i] -= 1;
               if (verbosity > 0) {
@@ -755,6 +775,7 @@ void intersection_removal(int verbosity) {
           for (int i = 0; i < VALUES; i++) {
             // Not the same box but on the col
             if (i / SUB_SIZE != subRow && possible[i][curCol][value] == 1) {
+              output = 1;
               possible[i][curCol][value] = 0;
               possibleCount[i][curCol] -= 1;
               if (verbosity > 0) {
@@ -795,6 +816,7 @@ void intersection_removal(int verbosity) {
           int curRow = subRow + pos / SUB_SIZE;
           int curCol = subCol + pos % SUB_SIZE;
           if (curRow != row && possible[curRow][curCol][value] == 1) {
+            output = 1;
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
@@ -830,6 +852,7 @@ void intersection_removal(int verbosity) {
           int curRow = subRow + pos / SUB_SIZE;
           int curCol = subCol + pos % SUB_SIZE;
           if (curCol != col && possible[curRow][curCol][value] == 1) {
+            output = 1;
             possible[curRow][curCol][value] = 0;
             possibleCount[curRow][curCol] -= 1;
             if (verbosity > 0) {
@@ -846,11 +869,13 @@ void intersection_removal(int verbosity) {
       }
     }
   }
+  return output;
 }
 
 // Removes values according to the contents of a known naked group
-void remove_naked_group(int* rows, int* cols, int* shared, int cells,
+int remove_naked_group(int* rows, int* cols, int* shared, int cells,
                       int mode, int verbosity) {
+  int output = 0;
   if (verbosity > 0) {
     printf(FOUND "Found naked group (");
     for (int i = 0; i < cells - 1; i++) {
@@ -872,7 +897,8 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
         mask[cols[i]] = 1;
       }
       for (int i = 0; i < cells; i++) {
-        remove_value_from_row(rows[i], shared[i], mask, verbosity);
+        output = max(output,
+          remove_value_from_row(rows[i], shared[i], mask, verbosity));
       }
       break;
     }
@@ -882,7 +908,8 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
         mask[rows[i]] = 1;
       }
       for (int i = 0; i < cells; i++) {
-        remove_value_from_column(cols[i], shared[i], mask, verbosity);
+        output = max(output,
+          remove_value_from_column(cols[i], shared[i], mask, verbosity));
       }
       break;
     }
@@ -892,7 +919,8 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
         mask[SUB_SIZE * (rows[i] % SUB_SIZE) + cols[i] % SUB_SIZE] = 1;
       }
       for (int i = 0; i < cells; i++) {
-        remove_value_from_box(rows[i], cols[i], shared[i], mask, verbosity);
+        output = max(output,
+          remove_value_from_box(rows[i], cols[i], shared[i], mask, verbosity));
       }
       break;
     }
@@ -901,11 +929,13 @@ void remove_naked_group(int* rows, int* cols, int* shared, int cells,
       exit(1);
     }
   }
+  return output;
 }
 
 // Removes values according to the contents of a known hidden group
-void remove_hidden_group(int* rows, int* cols, int* shared, int cells,
+int remove_hidden_group(int* rows, int* cols, int* shared, int cells,
                       int mode, int verbosity) {
+  int output = 0;
   if (verbosity > 0) {
     printf(FOUND "Found hidden group (");
     for (int i = 0; i < cells - 1; i++) {
@@ -934,6 +964,7 @@ void remove_hidden_group(int* rows, int* cols, int* shared, int cells,
       }
       // Remove possibility from cells
       if (possible[rows[pos]][cols[pos]][value] == 1) {
+        output = 1;
         possible[rows[pos]][cols[pos]][value] = 0;
         possibleCount[rows[pos]][cols[pos]] -= 1;
         if (verbosity > 0) {
@@ -943,10 +974,11 @@ void remove_hidden_group(int* rows, int* cols, int* shared, int cells,
       }
     }
   }
+  return output;
 }
 
 // Evaluates a naked group by checking validity and using to remove redundancy
-void eval_naked_group(int* candidates, int size, int pos,
+int eval_naked_group(int* candidates, int size, int pos,
     int mode, int verbosity) {
   // Loop through candidates to obtain shared values
   int preShared[VALUES];
@@ -994,13 +1026,14 @@ void eval_naked_group(int* candidates, int size, int pos,
   for (int value = 0; value < VALUES; value++) {
     if (preShared[value] > 0) {
       if (sharedCounter == size) {
-        return; // Too many values to be a naked group
+        return 0; // Too many values to be a naked group
       }
       shared[sharedCounter] = value;
       sharedCounter += 1;
     }
   }
 
+  int output = 0;
   int rows[size];
   int cols[size];
   memset(rows, 0, sizeof(rows));
@@ -1032,7 +1065,8 @@ void eval_naked_group(int* candidates, int size, int pos,
     }
   }
 
-  remove_naked_group(rows, cols, shared, size, mode, verbosity);
+  output = max(output,
+    remove_naked_group(rows, cols, shared, size, mode, verbosity));
 
   // Additional shared groups if any
   int sharedValue = -1;
@@ -1047,7 +1081,8 @@ void eval_naked_group(int* candidates, int size, int pos,
       }
     }
     if (sharesGroup == 1) {
-      remove_naked_group(rows, cols, shared, size, 2, verbosity);
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 2, verbosity));
     }
   } else {
     for (int i = 0; i < size; i++) {
@@ -1059,7 +1094,8 @@ void eval_naked_group(int* candidates, int size, int pos,
       }
     }
     if (sharesGroup == 1) {
-      remove_naked_group(rows, cols, shared, size, 0, verbosity);
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 0, verbosity));
     }
 
     sharedValue = -1;
@@ -1073,13 +1109,15 @@ void eval_naked_group(int* candidates, int size, int pos,
       }
     }
     if (sharesGroup == 1) {
-      remove_naked_group(rows, cols, shared, size, 1, verbosity);
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 1, verbosity));
     }
   }
+  return output;
 }
 
 // Evaluates a hidden group by checking validity and using to remove redundancy
-void eval_hidden_group(int* candidates, int size, int pos,
+int eval_hidden_group(int* candidates, int size, int pos,
     int mode, int verbosity) {
   // Loop through candidates to obtain shared positions
   int preShared[VALUES];
@@ -1127,7 +1165,7 @@ void eval_hidden_group(int* candidates, int size, int pos,
   for (int position = 0; position < VALUES; position++) {
     if (preShared[position] > 0) {
       if (sharedCounter == size) {
-        return; // Too many values to be a hidden group
+        return 0; // Too many values to be a hidden group
       }
       shared[sharedCounter] = position;
       sharedCounter += 1;
@@ -1135,7 +1173,7 @@ void eval_hidden_group(int* candidates, int size, int pos,
   }
 
   if (sharedCounter < size) {
-    return;
+    return 0;
   }
 
   int rows[size];
@@ -1169,7 +1207,7 @@ void eval_hidden_group(int* candidates, int size, int pos,
     }
   }
 
-  remove_hidden_group(rows, cols, candidates, size, mode, verbosity);
+  return remove_hidden_group(rows, cols, candidates, size, mode, verbosity);
 }
 
 // OPTIMIZATION: only last candidate size - cur size are evaluated
@@ -1177,18 +1215,18 @@ void eval_hidden_group(int* candidates, int size, int pos,
 
 // Recursive function to create groups of candidate numbers to be evaluated
 //  as groups of the given size (used for both naked and hidden)
-void candid_group(int considered[VALUES], int curIndex, int groupSize,
+int candid_group(int considered[VALUES], int curIndex, int groupSize,
     int curSize, int* candidates, int pos, int mode,
     int verbosity, int isHidden) {
   if (curSize == groupSize) {
     if (isHidden == 1) {
-      eval_hidden_group(candidates, groupSize, pos, mode, verbosity);
+      return eval_hidden_group(candidates, groupSize, pos, mode, verbosity);
     } else {
-      eval_naked_group(candidates, groupSize, pos, mode, verbosity);
+      return eval_naked_group(candidates, groupSize, pos, mode, verbosity);
     }
-    return;
   }
   // use curIndex and candidates to get next curIndex
+  int output = 0;
   int nextIndex;
   do {
     nextIndex = -1;
@@ -1201,27 +1239,29 @@ void candid_group(int considered[VALUES], int curIndex, int groupSize,
     // if valid index, then recurse further
     if (nextIndex != -1) {
       candidates[curSize] = nextIndex;
-      candid_group(considered, nextIndex, groupSize, curSize + 1,
-        candidates, pos, mode, verbosity, isHidden);
+      output = max(candid_group(considered, nextIndex, groupSize, curSize + 1,
+        candidates, pos, mode, verbosity, isHidden), output);
       // update curIndex to allow next value to be considered
       curIndex = nextIndex;
     }
   } while (nextIndex != -1);
+  return output;
   // if invalid index, then return (candidates only used after full assignment)
 }
 
 // Wrapper function for forming naked groups and evaluating them
-void find_group(int considered[VALUES], int size, int pos,
+int find_group(int considered[VALUES], int size, int pos,
     int mode, int verbosity, int isHidden) {
   int candidates[size];
   memset(candidates, 0, sizeof(candidates));
-  candid_group(considered, -1, size, 0, candidates, pos,
+  return candid_group(considered, -1, size, 0, candidates, pos,
     mode, verbosity, isHidden);
 }
 
 // Loop through all houses and find cells containing same group of values,
 //  and remove from these values from all other linked houses
-void naked_groups(int size, int verbosity) {
+int naked_groups(int size, int verbosity) {
+  int output = 0;
   if (verbosity > 0) {
     printf(PROCESS "Finding naked groups of size %i...\n", size);
   }
@@ -1242,7 +1282,7 @@ void naked_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (count >= size) {
-      find_group(considered, size, row, 0, verbosity, 0);
+      output = max(output, find_group(considered, size, row, 0, verbosity, 0));
     }
   }
   // COL
@@ -1257,7 +1297,7 @@ void naked_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (count >= size) {
-      find_group(considered, size, col, 1, verbosity, 0);
+      output = max(output, find_group(considered, size, col, 1, verbosity, 0));
     }
   }
   // SUBGRID
@@ -1276,16 +1316,18 @@ void naked_groups(int size, int verbosity) {
       }
       // If we consider enough cells, begin to find naked groups
       if (count >= size) {
-        find_group(considered, size, (subRow * SUB_SIZE) + subCol,
-          2, verbosity, 0);
+        output = max(find_group(considered, size, (subRow * SUB_SIZE) + subCol,
+          2, verbosity, 0), output);
       }
     }
   }
+  return output;
 }
 
 // Loop through all houses and find 2 cells with pair that only appear there,
 //  and remove all the other values from those cells
-void hidden_groups(int size, int verbosity) {
+int hidden_groups(int size, int verbosity) {
+  int output = 0;
   if (verbosity > 0) {
     printf(PROCESS "Finding hidden groups of size %i...\n", size);
   }
@@ -1313,7 +1355,7 @@ void hidden_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (valueFrequency >= size) {
-      find_group(considered, size, row, 0, verbosity, 1);
+      output = max(output, find_group(considered, size, row, 0, verbosity, 1));
     }
   }
   // COL
@@ -1334,7 +1376,7 @@ void hidden_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (valueFrequency >= size) {
-      find_group(considered, size, col, 1, verbosity,1);
+      output = max(output, find_group(considered, size, col, 1, verbosity, 1));
     }
   }
   // SUBGRID
@@ -1358,30 +1400,50 @@ void hidden_groups(int size, int verbosity) {
       }
       // If we consider enough cells, begin to find naked groups
       if (valueFrequency >= size) {
-        find_group(considered, size, (subRow * SUB_SIZE) + subCol,
-          2, verbosity, 1);
+        output = max(find_group(considered, size, (subRow * SUB_SIZE) + subCol,
+          2, verbosity, 1), output);
       }
     }
   }
+  return output;
 }
 
 // Elminates redundant possibilities using the techniques the solver knows
-void eliminate_redundant(int verbosity) {
+int eliminate_redundant(int verbosity) {
+  int output = 0;
+  int step = 0;
   if (verbosity > 0) {
     printf(PROCESS "Removing redundant values...\n");
   }
-  for (int size = 2; size <= 4; size++) {
-    naked_groups(size, verbosity);
-    hidden_groups(size, verbosity);
+  while (output == 0 && step < 3) {
+    switch (step) {
+      case 0: {
+        for (int size = 2; size <= 4; size++) {
+          output = max(output, naked_groups(size, verbosity));
+        }
+        break;
+      }
+      case 1: {
+        for (int size = 2; size <= 4; size++) {
+          output = max(output, hidden_groups(size, verbosity));
+        }
+        break;
+      }
+      case 2: {
+        output = max(output, intersection_removal(verbosity));
+        break;
+      }
+    }
+    step += 1;
   }
-  intersection_removal(verbosity);
+  return output;
 }
 
 
 /* --- PROCESS LOOP --- */
 
 // Process the next iteration of the loop
-int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
+int process_next(int* cellsLeft, int verbosity, int forceFlag) {
   if (*cellsLeft == 0) {
     return 1;
   }
@@ -1393,11 +1455,9 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
         break; // If found, stop checking
       }
     }
-    if (pair == NULL) { // If there still is not pair found then try brute force
-      if (*stripped < 2) {
-        // If still no pair then remove redundant values, mark this, try again
-        eliminate_redundant(verbosity);
-        *stripped += 1;
+    if (pair == NULL) { // If there still is no pair found, remove redundancy
+      // If nothing was eliminated (stalemate), then brute force or fail
+      if (eliminate_redundant(verbosity) == 1) {
         return 0;
       } else {
         if (verbosity > 0 && forceFlag == -1) {
@@ -1424,7 +1484,6 @@ int process_next(int* cellsLeft, int* stripped, int verbosity, int forceFlag) {
     return 1;
   }
 
-  *stripped = 0;
   grid[pair[0]][pair[1]] = valid[value + 1];
   // Clear filled cell of all possibilities
   for (int val = 0; val < VALUES; val++) {
@@ -1627,9 +1686,8 @@ int read_bulk(const char* fileName, int forceFlag) {
       brute_force(0);
     } else {
       int cellsLeft = 0;
-      int stripped = 0;
       pre_process(&cellsLeft);
-      while (process_next(&cellsLeft, &stripped, 0, forceFlag) != 1) {}
+      while (process_next(&cellsLeft, 0, forceFlag) != 1) {}
     }
 
     // Set current to be first char of solution
@@ -1748,9 +1806,8 @@ int main(int argc, char* argv[]) {
     brute_force(verbosity);
   } else {
     int cellsLeft = 0;
-    int stripped = 0;
     pre_process(&cellsLeft);
-    while (process_next(&cellsLeft, &stripped, verbosity, forceFlag) != 1) {}
+    while (process_next(&cellsLeft, verbosity, forceFlag) != 1) {}
   }
 
   // Display solution
