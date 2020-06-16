@@ -1215,47 +1215,56 @@ int eval_hidden_group(int* candidates, int size, int pos,
 
 // Recursive function to create groups of candidate numbers to be evaluated
 //  as groups of the given size (used for both naked and hidden)
-int candid_group(int considered[VALUES], int curIndex, int groupSize,
-    int curSize, int* candidates, int pos, int mode,
-    int verbosity, int isHidden) {
-  if (curSize == groupSize) {
+//  Optimization with early exit if not enough candidates left for group
+int candid_group(int considered[VALUES], int curConsidered, int candidCount,
+    int* candidates, int curCandid, int targetSize, int curSize,
+    int pos, int mode, int verbosity, int isHidden) {
+  // If the target group size is met, evaluate the group
+  if (curSize == targetSize) {
     if (isHidden == 1) {
-      return eval_hidden_group(candidates, groupSize, pos, mode, verbosity);
+      return eval_hidden_group(candidates, targetSize, pos, mode, verbosity);
     } else {
-      return eval_naked_group(candidates, groupSize, pos, mode, verbosity);
+      return eval_naked_group(candidates, targetSize, pos, mode, verbosity);
     }
   }
-  // use curIndex and candidates to get next curIndex
+  // If not enough candidates left to form a group, then quit
+  if (candidCount - curCandid < targetSize - curSize) {
+    return 0;
+  }
+  // Use curConsidered and candidates to get next curConsidered
   int output = 0;
-  int nextIndex;
+  int nextConsidered;
+  int nextCandid = curCandid;
   do {
-    nextIndex = -1;
-    for (int i = curIndex + 1; i < VALUES; i++) {
+    nextConsidered = -1;
+    for (int i = curConsidered + 1; i < VALUES; i++) {
       if (considered[i] == 1) {
-        nextIndex = i;
+        nextConsidered = i;
+        nextCandid += 1;
         break;
       }
     }
-    // if valid index, then recurse further
-    if (nextIndex != -1) {
-      candidates[curSize] = nextIndex;
-      output = max(candid_group(considered, nextIndex, groupSize, curSize + 1,
-        candidates, pos, mode, verbosity, isHidden), output);
-      // update curIndex to allow next value to be considered
-      curIndex = nextIndex;
+    // If valid index, then recurse further
+    if (nextConsidered != -1) {
+      candidates[curSize] = nextConsidered;
+      output = max(candid_group(considered, nextConsidered, candidCount,
+        candidates, nextCandid, targetSize, curSize + 1, pos, mode, verbosity,
+        isHidden), output);
+      // Update curConsidered to allow next value to be considered
+      curConsidered = nextConsidered;
     }
-  } while (nextIndex != -1);
+  } while (nextConsidered != -1);
   return output;
   // if invalid index, then return (candidates only used after full assignment)
 }
 
 // Wrapper function for forming naked groups and evaluating them
-int find_group(int considered[VALUES], int size, int pos,
+int find_group(int considered[VALUES], int candidCount, int size, int pos,
     int mode, int verbosity, int isHidden) {
   int candidates[size];
   memset(candidates, 0, sizeof(candidates));
-  return candid_group(considered, -1, size, 0, candidates, pos,
-    mode, verbosity, isHidden);
+  return candid_group(considered, -1, candidCount, candidates, -1, size, 0,
+    pos, mode, verbosity, isHidden);
 }
 
 // Loop through all houses and find cells containing same group of values,
@@ -1282,7 +1291,8 @@ int naked_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (count >= size) {
-      output = max(output, find_group(considered, size, row, 0, verbosity, 0));
+      output = max(output,
+        find_group(considered, count, size, row, 0, verbosity, 0));
     }
   }
   // COL
@@ -1297,7 +1307,8 @@ int naked_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (count >= size) {
-      output = max(output, find_group(considered, size, col, 1, verbosity, 0));
+      output = max(output,
+        find_group(considered, count, size, col, 1, verbosity, 0));
     }
   }
   // SUBGRID
@@ -1316,8 +1327,8 @@ int naked_groups(int size, int verbosity) {
       }
       // If we consider enough cells, begin to find naked groups
       if (count >= size) {
-        output = max(find_group(considered, size, (subRow * SUB_SIZE) + subCol,
-          2, verbosity, 0), output);
+        output = max(find_group(considered, count, size,
+          (subRow * SUB_SIZE) + subCol, 2, verbosity, 0), output);
       }
     }
   }
@@ -1355,7 +1366,8 @@ int hidden_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (valueFrequency >= size) {
-      output = max(output, find_group(considered, size, row, 0, verbosity, 1));
+      output = max(output,
+        find_group(considered, valueFrequency, size, row, 0, verbosity, 1));
     }
   }
   // COL
@@ -1376,7 +1388,8 @@ int hidden_groups(int size, int verbosity) {
     }
     // If we consider enough cells, begin to find naked groups
     if (valueFrequency >= size) {
-      output = max(output, find_group(considered, size, col, 1, verbosity, 1));
+      output = max(output,
+        find_group(considered, valueFrequency, size, col, 1, verbosity, 1));
     }
   }
   // SUBGRID
@@ -1400,8 +1413,8 @@ int hidden_groups(int size, int verbosity) {
       }
       // If we consider enough cells, begin to find naked groups
       if (valueFrequency >= size) {
-        output = max(find_group(considered, size, (subRow * SUB_SIZE) + subCol,
-          2, verbosity, 1), output);
+        output = max(find_group(considered, valueFrequency, size,
+          (subRow * SUB_SIZE) + subCol, 2, verbosity, 1), output);
       }
     }
   }
