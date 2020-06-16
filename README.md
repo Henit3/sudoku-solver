@@ -5,7 +5,7 @@ Compilation:
 `clang -o sudoku.out sudoku.c` or `gcc -o sudoku.out sudoku.c -lm`
 
 Usage:
-`./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>`
+`./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]] [-d] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>`
 
 Options:
  * -v verbose output, lists steps in solving
@@ -14,6 +14,7 @@ Options:
  * -t shows the benchmarked time for reading and execution
  * -f uses brute force for solving immediately
  * -nf disables use of brute force
+ * -d debug mode, shows all possibilities for each cell
  * -o exports solved grid to a new csv
  * -m provide missing argument if not in the grid
 
@@ -25,9 +26,11 @@ used as the N values that it contains, and has two modes of operation, deduction
 When operating under deduction mode (the default setting), it is capable of listing the steps
 performed to arrive at the solution that a human can follow on and understand why the step
 generates a valid value (using the `-v` option). It utilizes conventional deduction techniques,
-such as locating cells that may hold only one possible value and finding the only position
-available for a value in a region (row, column or subgrid), until it cannot carry on processing
-safely using these rules (resorting to brute force mode) or until it has produced a complete grid.
+such as locating cells that may hold only one possible value, finding the only position available
+for a value in a house (row, column or box), and using more advanced techniques such as
+pointing groups, box line reduction and disjoint subsets (hidden and naked groups) to restrict
+values to certain positions, until it cannot carry on processing safely using these rules
+(resorting to brute force mode) or until it has produced a complete grid.
 
 Operation under the brute force mode will execute a mindless recursive backtracking algorithm
 where values are tried in each cell, reverting to a previous point if the current cell has

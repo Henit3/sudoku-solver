@@ -1,23 +1,48 @@
+/// @file
+/// @brief Holds all the logic for the sudoku solver.
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
 
-#define ROW_BUF_SIZE 500
-#define PAD_SIZE 15
+#define ROW_BUF_SIZE  500 // The buffer for each row when reading input
+#define PAD_SIZE      15 // The size of optional padding when printing output
 
-char*** grid; // Don't need it to be int as no processing done
-int*** possible; // Stores all possibilities (Space n^3)!
-int** possibleCount; // Trades off space in favour of time
-char** valid;
-int VALUES, SUB_SIZE;
+#define PROCESS       "\x1B[34m> \x1B[0m" // Blue   >
+#define FOUND         "\x1B[33m? \x1B[0m" // Yelow  ?
+#define REMOVE        "\x1B[31m- \x1B[0m" // Red    -
+#define ADD           "\x1B[32m+ \x1B[0m" // Green  +
 
-// Processes the command line arguments provided
-int process_arguments(int argc, char* argv[],
-                      int* verbosity, int* bulkFlag,
-                      int* timeFlag, int* forceFlag,
-                      char** inCsv, char** outCsv, char** missing) {
+char*** grid; ///< A string 2-D array storing known or determined values
+int*** possible; ///< Stores all possible values for each cell in the grid
+int** possibleCount; ///< Stores the number of possibilities for each cell
+char** valid; ///< Stores the valid tokens that can be used in the sudoku grid
+int VALUES; ///< The number of values that the sudoku can hold
+int SUB_SIZE; ///< The root of the values; i.e. the length of the boxes
+char* MODE_LABELS[] = {"rows", "cols", "boxes"};
+
+
+/* --- INITIALIZERS --- */
+
+/** Processes the command line arguments provided.
+ *
+ *  @param[in]      argc      The number of command line arguments
+ *  @param[in]      argv      The command line arguments
+ *  @param[in, out] verbosity How verbose the output has been set to
+ *  @param[in, out] bulkFlag  Whether we are evaluating a bulk file
+ *  @param[in, out] timeFlag  Whether we are benchmarking the time taken
+ *  @param[in, out] forceFlag How much brute force we can apply
+ *  @param[in, out] debugFlag Whether to print the possibilities at the end
+ *  @param[in, out] inCsv     The input CSV file to read from
+ *  @param[in, out] outCsv    The output CSV file to write to (if at all)
+ *  @param[in, out] missing   The missing token to use (if required)
+ *  @param[out]     status    0: Success, 1: Invalid arguments
+ */
+int process_arguments(int argc, char* argv[], int* verbosity, int* bulkFlag,
+    int* timeFlag, int* forceFlag, int* debugFlag,
+    char** inCsv, char** outCsv, char** missing) {
   // Check if enough arguments provided
   if (argc < 2) {
     fprintf(stderr, "Not enough arguments\n");
@@ -52,6 +77,13 @@ int process_arguments(int argc, char* argv[],
         *bulkFlag = 1;
       } else {
         fprintf(stderr, "Duplicate -b flag found\n");
+        return 1;
+      }
+    } else if (strcmp("-d", argv[i]) == 0) { // Debug flag
+      if (*debugFlag == 0) { // Check if already specified
+        *debugFlag = 1;
+      } else {
+        fprintf(stderr, "Duplicate -d flag found\n");
         return 1;
       }
     } else if (strcmp("-o", argv[i]) == 0) { // Out flag + path
@@ -113,7 +145,12 @@ int process_arguments(int argc, char* argv[],
   return 0;
 }
 
-// Allocates and initializes the global variables
+/** Allocates and initializes the global variables.
+ *
+ *  @param[in]  buffer  A buffer containing the file contents to be parsed from
+ *  @param[in]  isBulk  Whether the file has a bulk format
+ *  @param[out] status  0: Success, 1: Invalid sudoku
+ */
 int initialize_globals(char buffer[ROW_BUF_SIZE], int isBulk) {
   // Gets number of values
   if (!isBulk) {
@@ -154,7 +191,7 @@ int initialize_globals(char buffer[ROW_BUF_SIZE], int isBulk) {
   return 0;
 }
 
-// Frees the dynamically allocated global variables
+/** Frees the dynamically allocated global variables. */
 void free_globals() {
   // No need to free cells, since they reference those in valid
   for (int i = 0; i < VALUES; i++) {
@@ -181,7 +218,12 @@ void free_globals() {
   free(valid);
 }
 
-// Add the token to the valid array if not full
+/** Add the token to the valid array if not full.
+ *
+ *  @param[in, out] tokenCount  The number of tokens currently parsed
+ *  @param[in]      token       A candidate token for the array of valid tokens
+ *  @param[out]     status      0: Success, 1: Invalid sudoku
+ */
 int addToValid(int* tokenCount, char* token) {
   int new = 1;
   for (int i = 0; i < *tokenCount; i++) {
@@ -200,7 +242,13 @@ int addToValid(int* tokenCount, char* token) {
   return 0;
 }
 
-// Sanitize, and set the grid to reference a valid token
+/** Sanitize, and set the grid to reference a valid token.
+ *
+ *  @param[in, out] tokenCount  The number of tokens currently parsed
+ *  @param[in]      token       A candidate token for the array of valid tokens
+ *  @param[in]      row, col    The position of the token
+ *  @param[out]     status      0: Success, 1: Invalid sudoku
+ */
 int process_token(int* tokenCount, char* token, int row, int col) {
   if (strchr(token, '\n') != NULL) { // Sanitize token
     printf("\\n converted at (%i, %i)\n", row, col);
@@ -222,7 +270,12 @@ int process_token(int* tokenCount, char* token, int row, int col) {
   return 0;
 }
 
-// Reads from a csv file and loads into the grid
+/** Reads from a csv file and loads into the grid.
+ *
+ *  @param[in]  fileName  The path to the file to use as input and read from
+ *  @param[in]  missing   The missing token to use (if required)
+ *  @param[out] status    -1: Invalid pre-global, 0: Success, 1: Invalid
+ */
 int read_csv(const char* fileName, char* missing) {
   FILE* input = fopen(fileName, "r");
   if (input == NULL) {
@@ -278,7 +331,13 @@ int read_csv(const char* fileName, char* missing) {
   return 0;
 }
 
-// Stores all columns as a bitmap of numbers
+
+/* --- PRE PROCESS POSSIBILITIES --- */
+
+/** Stores all columns as a bitmap of numbers.
+ *
+ *  @param[in, out] array The bitmap of numbers to store the output into
+ */
 void get_columns_bitmap(int array[VALUES][VALUES]) {
   for (int col = 0; col < VALUES; col++) {
     for (int row = 0; row < VALUES; row++) {
@@ -294,11 +353,14 @@ void get_columns_bitmap(int array[VALUES][VALUES]) {
   }
 }
 
-// Stores all subGrids as bitmap before main loop
-void get_subgrids_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
+/** Stores all columns as a bitmap of numbers.
+ *
+ *  @param[in, out] array The bitmap of numbers to store the output into
+ */
+void get_boxes_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
   for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
     for (int row = 0; row < SUB_SIZE; row++) {
-      for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of subGrid
+      for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of box
         for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
           int curRow = row * SUB_SIZE + subRow;
           int curCol = col * SUB_SIZE + subCol;
@@ -316,7 +378,11 @@ void get_subgrids_bitmap(int array[SUB_SIZE][SUB_SIZE][VALUES]) {
   }
 }
 
-// Stores all the current row as a bitmap of numbers
+/** Stores the current row as a bitmap of numbers.
+ *
+ *  @param[in]      row   The row number to use as input for conversion
+ *  @param[in, out] array The bitmap of numbers to store the output into
+ */
 void get_row_bitmap(int row, int array[VALUES]) {
   for (int col = 0; col < VALUES; col++) {
     if (strcmp(grid[row][col], "-") == 0) {
@@ -330,15 +396,18 @@ void get_row_bitmap(int row, int array[VALUES]) {
   }
 }
 
-// Initializes a bitmap to hold possible values
+/** Initializes a bitmap to hold possible values.
+ *
+ *  @param[in, out] cellsLeft The number of cells left to solve the sudoku
+ */
 void pre_process(int* cellsLeft) {
   int allCols[VALUES][VALUES]; // Stores all columns as bitmap before main loop
   memset(allCols, 0, sizeof(allCols)); // Initialize before use
   get_columns_bitmap(allCols);
 
-  int subGrids[SUB_SIZE][SUB_SIZE][VALUES];
-  memset(subGrids, 0, sizeof(subGrids)); // Initialize before use
-  get_subgrids_bitmap(subGrids);
+  int boxes[SUB_SIZE][SUB_SIZE][VALUES];
+  memset(boxes, 0, sizeof(boxes)); // Initialize before use
+  get_boxes_bitmap(boxes);
 
   int curRow[VALUES]; // Stores row values as bitmap in the currentRow
   for (int row = 0; row < VALUES; row++) {
@@ -348,10 +417,10 @@ void pre_process(int* cellsLeft) {
     // Update the main bitmap to store possibilities per cell
     for (int col = 0; col < VALUES; col++) {
       for (int val = 0; val < VALUES; val++) {
-        // Check if already full, is in the row, column or subGrid
+        // Check if already full, is in the row, column or box
         if (strcmp(grid[row][col], "-") == 0
         && curRow[val] == 0 && allCols[col][val] == 0
-        && subGrids[row / SUB_SIZE][col / SUB_SIZE][val] == 0) {
+        && boxes[row / SUB_SIZE][col / SUB_SIZE][val] == 0) {
           if (possibleCount[row][col] == 0) {
             *cellsLeft += 1;
           }
@@ -363,185 +432,15 @@ void pre_process(int* cellsLeft) {
   }
 }
 
-// Dynamically allocated and initializes a pair of values
-int* make_pair(int row, int col) {
-  int* pair = calloc(2, sizeof(int));
-  pair[0] = row;
-  pair[1] = col;
-  return pair;
-}
 
-// Gets the next pair of row and column where there is only one possibility
-int* find_single() {
-  for (int row = 0; row < VALUES; row++) {
-    for (int col = 0; col < VALUES; col++) {
-      if (possibleCount[row][col] == 1) {
-        return make_pair(row, col);
-      }
-    }
-  }
-  return NULL;
-}
+/* --- PRINTERS --- */
 
-// Gets pair of row and col that is only place for a possible value in a row
-// (968 found in 1 million)
-int* unique_in_row(int* value) {
-  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
-  for (int row = 0; row < VALUES; row++) { // Check in each row
-    memset(checkArray, 0, sizeof(checkArray)); // Reset array
-    for (int col = 0; col < VALUES; col++) { // Update value in checkArray
-      // Go through possibilities in cell and add to checkArray
-      for (int val = 0; val < VALUES; val++) {
-        if (possible[row][col][val] == 1) {
-          checkArray[val][0] += 1; // Increase the frequency of the value
-          checkArray[val][1] = col; // Set last found to this column
-        }
-      }
-    }
-    // Go through all values and see if frequency is 1, if so, output it
-    for (int val = 0; val < VALUES; val++) {
-      if (checkArray[val][0] == 1) {
-        *value = val + 1;
-        return make_pair(row, checkArray[val][1]);
-      }
-    }
-  }
-  return NULL;
-}
-
-// Gets pair of row and col that is only place for a possible value in a col
-// (2 found in 1 million)
-int* unique_in_col(int* value) {
-  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
-  for (int col = 0; col < VALUES; col++) { // Check in each subGrid
-    memset(checkArray, 0, sizeof(checkArray)); // Reset array
-    for (int row = 0; row < VALUES; row++) { // Go through cells in subGrid
-      // Go through possibilities in cell and add to checkArray
-      for (int val = 0; val < VALUES; val++) {
-        if (possible[row][col][val] == 1) {
-          checkArray[val][0] += 1; // Increase the frequency of the value
-          checkArray[val][1] = row; // Set last found to this row
-        }
-      }
-    }
-    // Go through all values and see if frequency is 1, if so, output it
-    for (int val = 0; val < VALUES; val++) {
-      if (checkArray[val][0] == 1) {
-        *value = val + 1;
-        return make_pair(checkArray[val][1], col);
-      }
-    }
-  }
-  return NULL;
-}
-
-// Gets pair of row and col that is only place for a possible value in a subGrid
-// Not sure if ever needed so couldn't be tested (0 found in 1 million)
-int* unique_in_subgrid(int* value) {
-  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
-  for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
-    for (int row = 0; row < SUB_SIZE; row++) {
-      memset(checkArray, 0, sizeof(checkArray)); // Reset array
-      for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of subGrid
-        for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
-          int curRow = row * SUB_SIZE + subRow;
-          int curCol = col * SUB_SIZE + subCol;
-          // Go through possibilities in cell and add to checkArray
-          for (int val = 0; val < VALUES; val++) {
-            if (possible[curRow][curCol][val] == 1) {
-              checkArray[val][0] += 1; // Increase the frequency of the val
-              int curIndex = curCol * SUB_SIZE + curRow;
-              checkArray[val][1] = curIndex; // Set last found to curIndex
-            }
-          }
-        }
-      }
-      // Go through all values and see if frequency is 1, if so, output it
-      for (int val = 0; val < VALUES; val++) {
-        if (checkArray[val][0] == 1) {
-          *value = val + 1;
-          int pairRow = (row * SUB_SIZE) + (checkArray[val][1] / SUB_SIZE);
-          int pairCol = (col * SUB_SIZE) + (checkArray[val][1] % SUB_SIZE);
-          return make_pair(pairRow, pairCol);
-        }
-      }
-    }
-  }
-  return NULL;
-}
-
-// Gets a pair of row and col which is the only possible location for a
-//  certain value in a region using other three "unique_in" functions
-int* unique_in_range(int mode, int* value) {
-  int* output = NULL;
-  if ((output = unique_in_row(value)) != NULL) {
-    return output;
-  }
-  if ((output = unique_in_col(value)) != NULL) {
-    return output;
-  }
-  if ((output = unique_in_subgrid(value)) != NULL) {
-    return output;
-  }
-  return NULL;
-}
-
-// Assumes there is only one value in the bitmap and retrieves it
-int get_possible_value(int* pair) {
-  for (int i = 0; i < VALUES; i++) {
-    if (possible[pair[0]][pair[1]][i] == 1) {
-      return i + 1;
-    }
-  }
-  return -1;
-}
-
-// Removes a value from the possibilities of all others in the same row
-void remove_value_from_row(int* pair, int value) {
-  for (int col = 0; col < VALUES; col++) {
-    if (pair[1] == col) {
-      continue;
-    }
-    // Only if the value is in its possibilities
-    if (possible[pair[0]][col][value - 1] == 1) {
-      possible[pair[0]][col][value - 1] = 0;
-      possibleCount[pair[0]][col] -= 1;
-    }
-  }
-}
-
-// Removes a value from the possibilities of all others in the same column
-void remove_value_from_column(int* pair, int value) {
-  for (int row = 0; row < VALUES; row++) {
-    if (pair[0] == row) {
-      continue;
-    }
-    // Only if the value is in its possibilities
-    if (possible[row][pair[1]][value - 1] == 1) {
-      possible[row][pair[1]][value - 1] = 0;
-      possibleCount[row][pair[1]] -= 1;
-    }
-  }
-}
-
-// Removes a value from the possibilities of all others in the same subGrid
-void remove_value_from_subgrid(int* pair, int value) {
-  int subRow = (pair[0] / SUB_SIZE) * SUB_SIZE;
-  int subCol = (pair[1] / SUB_SIZE) * SUB_SIZE;
-  for (int i = 0; i < VALUES; i++) {
-    int inRow = i / SUB_SIZE;
-    int inCol = i % SUB_SIZE;
-    if (inCol + subCol == pair[0] && inRow + subRow == pair[1]) {
-      continue;
-    }
-    if (possible[subRow + inRow][subCol + inCol][value - 1] == 1) {
-      possible[subRow + inRow][subCol + inCol][value - 1] = 0;
-      possibleCount[subRow + inRow][subCol + inCol] -= 1;
-    }
-  }
-}
-
-// Prints a grid cell's possible contents
+/** Prints a grid cell's possible contents.
+ *
+ *  @param[in]  array     The array to be printed out
+ *  @param[in]  len       The length of the array
+ *  @param[in]  isPadded  Whether the output should be padded
+ */
 void print_array(int* array, int len, int isPadded) {
   printf("{");
   int count = 0;
@@ -566,9 +465,9 @@ void print_array(int* array, int len, int isPadded) {
   }
 }
 
-// Prints all possible values for each cell in the grid (FOR TESTING)
+/** Prints all possible values for each cell in the grid (FOR TESTING). */
 void print_possible() {
-  printf("\n_________________________\n"); // Top
+  printf("Possible:\n_________________________\n"); // Top
   for (int row = 0; row < VALUES; row++) {
     if (row % SUB_SIZE == 0 && row != 0) {
       printf("-------------------------\n"); // Row sectioner
@@ -585,145 +484,11 @@ void print_possible() {
   printf("_________________________\n\n"); // Bottom
 }
 
-// Checks if the value is valid (no duplicates) in the given row
-int valid_in_row(int value, int row) {
-  for (int col = 0; col < VALUES; col++) {
-    if (grid[row][col] == valid[value]) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-// Checks if the value is valid (no duplicates) in the given column
-int valid_in_col(int value, int col) {
-  for (int row = 0; row < VALUES; row++) {
-    if (grid[row][col] == valid[value]) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-// Checks if the value is valid (no duplicates) in the given subgrid
-int valid_in_subgrid(int value, int row, int col) {
-  int subRow = SUB_SIZE * (row / SUB_SIZE);
-  int subCol = SUB_SIZE * (col / SUB_SIZE);
-  for (int pos = 0; pos < VALUES; pos++) {
-    if (grid[subRow + (pos / SUB_SIZE)][subCol + (pos % SUB_SIZE)]
-        == valid[value]) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-// Attempts to solve using a brute force mechanism
-int brute_force_rec(int cur_row, int cur_col, int verbosity) {
-  if (verbosity == 2) {
-    printf("Brute Force(%i, %i)\n", cur_row, cur_col);
-  }
-  int col_set = 0;
-  for (int row = cur_row; row < VALUES; row++) {
-    for (int col = 0; col < VALUES; col++) {
-      if (col_set == 0) {
-        col = cur_col;
-        col_set = 1;
-      }
-      if (grid[row][col] == valid[0]) {
-        int value = 0;
-        while (1) {
-          value += 1;
-          // Check if value is valid
-          if (value > VALUES) {
-            // Reset current value to '-' if all values failed (rollback)
-            grid[row][col] = valid[0];
-            return 1;
-          }
-          // If invalid for that position, then try with the next one
-          if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 ||
-              valid_in_subgrid(value, row, col) != 0) {
-            continue;
-          }
-          if (verbosity == 2) {
-            printf("Forced: %i, %i, %i\n", row, col, value);
-          }
-          grid[row][col] = valid[value];
-          // Return if successful till the end, otherwise keep looping
-          if (brute_force_rec(row + (col + 1) / VALUES,
-                              (col + 1) % VALUES, verbosity) == 0) {
-            return 0;
-          }
-        }
-      }
-      else if (verbosity == 2) {
-        printf("Skipped: %i, %i\n", row, col);
-      }
-    }
-  }
-  return 0;
-}
-
-// Wrapper function to handle result of recursive brute force appropriately
-void brute_force(int verbosity) {
-  if (verbosity > 0) {
-    fprintf(stderr, "Attempting brute force...\n");
-  }
-  if (brute_force_rec(0, 0, verbosity) == 1) {
-    printf("Brute Force failed.\n");
-  }
-}
-
-// Process the next iteration of the loop
-int process_next(int* cellsLeft, int verbosity, int forceFlag) {
-  if (*cellsLeft == 0) {
-    return 1;
-  }
-  int value = -1;
-  int* pair = find_single(); // Find cell with only one left
-  if (pair == NULL) { // If not found, try other methods
-    for (int mode = 0; mode < 3; mode++) { // Loop through row, col, subGrid
-      if ((pair = unique_in_range(mode, &value)) != NULL) {
-        break; // If found, stop checking
-      }
-    }
-    if (pair == NULL) { // If there still is not pair found then try brute force
-      if (verbosity > 0 && forceFlag == -1) {
-        fprintf(stderr, "Didn't find next pair. Cells left: %i\n", *cellsLeft);
-      }
-      if (forceFlag != -1) { // If brute force not disabled
-        brute_force(verbosity);
-      }
-      return 1;
-    }
-  } else {
-    value = get_possible_value(pair);
-  }
-  if (value == -1) {
-    fprintf(stderr, "Empty cell processed\n");
-    return 1;
-  }
-
-  grid[pair[0]][pair[1]] = valid[value];
-  for (int val = 0; val < VALUES; val++) {
-    possible[pair[0]][pair[1]][val] = 0;
-  }
-  possibleCount[pair[0]][pair[1]] = 0;
-  *cellsLeft -= 1;
-
-  remove_value_from_row(pair, value);
-  remove_value_from_column(pair, value);
-  remove_value_from_subgrid(pair, value);
-
-  // Show affected
-  if (verbosity > 0) {
-    printf("Added %s at (%i, %i)\n", valid[value], pair[0], pair[1]);
-  }
-  free(pair);
-  return 0;
-}
-
-// Prints a line of given length with a given character
+/** Prints a line of given length with a given character.
+ *
+ *  @param[in]  type      The character to use to print the line
+ *  @param[in]  length    The length of the line to be printed
+ */
 void print_line(char type, int length) {
   for (int i = 0; i < length; i++) {
     printf("%c", type);
@@ -731,7 +496,7 @@ void print_line(char type, int length) {
   printf("\n");
 }
 
-// Prints the current state of the grid in a formatted output
+/** Prints the current state of the grid in a formatted output. */
 void print_grid() {
   const int LINE_LENGTH = 2 * (VALUES + SUB_SIZE) + 1;
   printf("\n"); // Top
@@ -753,7 +518,1307 @@ void print_grid() {
   printf("\n"); // Bottom
 }
 
-// Writes the contents of the grid to a file in csv format
+
+/* --- VALUE OBTAINERS --- */
+
+/** Dynamically allocated and initializes a pair of values.
+ *
+ *  @param[in]  row, col  The values to fill the pair with
+ *  @param[out] pair      An int array of length two storing row and col
+ */
+int* make_pair(int row, int col) {
+  int* pair = calloc(2, sizeof(int));
+  pair[0] = row;
+  pair[1] = col;
+  return pair;
+}
+
+/** Gets the next pair of row and column where there is only one possibility.
+ *
+ *  @param[out] pair  The position of the single cell or NULL
+ */
+int* find_single() {
+  for (int row = 0; row < VALUES; row++) {
+    for (int col = 0; col < VALUES; col++) {
+      if (possibleCount[row][col] == 1) {
+        return make_pair(row, col);
+      }
+    }
+  }
+  return NULL;
+}
+
+/** Assumes there is only one value in the bitmap and retrieves it.
+ *
+ *  @param[in]  pair  The position of the cell to consider
+ *  @param[out] value The (0-indexed) value at the cell or -1 if multiple
+ */
+int get_possible_value(int* pair) {
+  for (int i = 0; i < VALUES; i++) {
+    if (possible[pair[0]][pair[1]][i] == 1) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+
+/* --- UNIQUE FINDERS --- */
+
+/** Gets position which is only place for a possible value in a row.
+ *
+ *  @param[in, out] value The value in this position (0-indexed)
+ *  @param[out]     pair  The position of the unique cell or NULL
+ */
+int* unique_in_row(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int row = 0; row < VALUES; row++) { // Check in each row
+    memset(checkArray, 0, sizeof(checkArray)); // Reset array
+    for (int col = 0; col < VALUES; col++) { // Update value in checkArray
+      // Go through possibilities in cell and add to checkArray
+      for (int val = 0; val < VALUES; val++) {
+        if (possible[row][col][val] == 1) {
+          checkArray[val][0] += 1; // Increase the frequency of the value
+          checkArray[val][1] = col; // Set last found to this column
+        }
+      }
+    }
+    // Go through all values and see if frequency is 1, if so, output it
+    for (int val = 0; val < VALUES; val++) {
+      if (checkArray[val][0] == 1) {
+        *value = val;
+        return make_pair(row, checkArray[val][1]);
+      }
+    }
+  }
+  return NULL;
+}
+
+/** Gets position which is only place for a possible value in a col.
+ *
+ *  @param[in, out] value The value in this position (0-indexed)
+ *  @param[out]     pair  The position of the unique cell or NULL
+ */
+int* unique_in_col(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int col = 0; col < VALUES; col++) { // Check in each box
+    memset(checkArray, 0, sizeof(checkArray)); // Reset array
+    for (int row = 0; row < VALUES; row++) { // Go through cells in box
+      // Go through possibilities in cell and add to checkArray
+      for (int val = 0; val < VALUES; val++) {
+        if (possible[row][col][val] == 1) {
+          checkArray[val][0] += 1; // Increase the frequency of the value
+          checkArray[val][1] = row; // Set last found to this row
+        }
+      }
+    }
+    // Go through all values and see if frequency is 1, if so, output it
+    for (int val = 0; val < VALUES; val++) {
+      if (checkArray[val][0] == 1) {
+        *value = val;
+        return make_pair(checkArray[val][1], col);
+      }
+    }
+  }
+  return NULL;
+}
+
+/** Gets position which is the only place for a possible value in a box.]
+ *
+ *  @param[in, out] value The value in this position (0-indexed)
+ *  @param[out]     pair  The position of the unique cell or NULL
+ */
+int* unique_in_box(int* value) {
+  int checkArray[VALUES][2]; // checkArray[X][0] = frequency, [1] = last found
+  for (int col = 0; col < SUB_SIZE; col++) { // Of main grid
+    for (int row = 0; row < SUB_SIZE; row++) {
+      memset(checkArray, 0, sizeof(checkArray)); // Reset array
+      for (int subCol = 0; subCol < SUB_SIZE; subCol++) { // Of box
+        for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+          int curRow = row * SUB_SIZE + subRow;
+          int curCol = col * SUB_SIZE + subCol;
+          // Go through possibilities in cell and add to checkArray
+          for (int val = 0; val < VALUES; val++) {
+            if (possible[curRow][curCol][val] == 1) {
+              checkArray[val][0] += 1; // Increase the frequency of the val
+              int curIndex = curRow * SUB_SIZE + curCol;
+              checkArray[val][1] = curIndex; // Set last found to curIndex
+            }
+          }
+        }
+      }
+      // Go through all values and see if frequency is 1, if so, output it
+      for (int val = 0; val < VALUES; val++) {
+        if (checkArray[val][0] == 1) {
+          *value = val;
+          int pairRow = (row * SUB_SIZE) + (checkArray[val][1] / SUB_SIZE);
+          int pairCol = (col * SUB_SIZE) + (checkArray[val][1] % SUB_SIZE);
+          return make_pair(pairRow, pairCol);
+        }
+      }
+    }
+  }
+  return NULL;
+}
+
+/** Gets position which is only place for a possible value in a house.
+ *  Uses the other three "unique_in" functions to achieve this.
+ *
+ *  @param[in, out] value The value in this position
+ *  @param[out]     pair  The position of the unique cell or NULL
+ */
+int* unique_in_range(int mode, int* value, int verbosity) {
+  int* output = NULL;
+  if ((output = unique_in_row(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in row\n",
+        valid[*value + 1], output[0], output[1]);
+    }
+    return output;
+  }
+  if ((output = unique_in_col(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in column\n",
+        valid[*value + 1], output[0], output[1]);
+    }
+    return output;
+  }
+  if ((output = unique_in_box(value)) != NULL) {
+    if (verbosity == 1) {
+      printf(ADD "Added %s at (%i, %i) as unique in box\n",
+        valid[*value + 1], output[0], output[1]);
+    }
+    return output;
+  }
+  return NULL;
+}
+
+
+/* --- REMOVERS --- */
+
+/** Removes a value from the possibilities of all others in the same row.
+ *
+ *  @param[in]  row       The row to be removed from
+ *  @param[in]  value     The value to be removed
+ *  @param[in]  mask      A bitmap with positions to ignore in removal
+ *  @param[in]  verbosity The verbosity of the output (print or hide)
+ *  @param[out] removed   (Bool) 0: False, 1: True
+ */
+int remove_value_from_row(int row, int value,
+    int mask[VALUES], int verbosity) {
+  int output = 0;
+  for (int col = 0; col < VALUES; col++) {
+    if (mask[col] == 1) {
+      continue;
+    }
+    // Only if the value is in its possibilities
+    if (possible[row][col][value] == 1) {
+      output = 1;
+      possible[row][col][value] = 0;
+      possibleCount[row][col] -= 1;
+      if (verbosity > 0) {
+        printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+          valid[value + 1], row, col);
+      }
+    }
+  }
+  return output;
+}
+
+/** Removes a value from the possibilities of all others in the same column.
+ *
+ *  @param[in]  col       The column to be removed from
+ *  @param[in]  value     The value to be removed
+ *  @param[in]  mask      A bitmap with positions to ignore in removal
+ *  @param[in]  verbosity The verbosity of the output (print or hide)
+ *  @param[out] removed   (Bool) 0: False, 1: True
+ */
+int remove_value_from_column(int col, int value,
+    int mask[VALUES], int verbosity) {
+  int output = 0;
+  for (int row = 0; row < VALUES; row++) {
+    if (mask[row] == 1) {
+      continue;
+    }
+    // Only if the value is in its possibilities
+    if (possible[row][col][value] == 1) {
+      output = 1;
+      possible[row][col][value] = 0;
+      possibleCount[row][col] -= 1;
+      if (verbosity > 0) {
+        printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+          valid[value + 1], row, col);
+      }
+    }
+  }
+  return output;
+}
+
+/** Removes a value from the possibilities of all others in the same box.
+ *
+ *  @param[in]  row, col  The position of a cell in the box to be removed from
+ *  @param[in]  value     The value to be removed
+ *  @param[in]  mask      A bitmap with positions to ignore in removal
+ *  @param[in]  verbosity The verbosity of the output (print or hide)
+ *  @param[out] removed   (Bool) 0: False, 1: True
+ */
+int remove_value_from_box(int row, int col, int value,
+    int mask[VALUES], int verbosity) {
+  int output = 0;
+  int subRow = (row / SUB_SIZE) * SUB_SIZE;
+  int subCol = (col / SUB_SIZE) * SUB_SIZE;
+  for (int i = 0; i < VALUES; i++) {
+    int inRow = i / SUB_SIZE;
+    int inCol = i % SUB_SIZE;
+    if (mask[i] == 1 || (inCol + subCol == col && inRow + subRow == row)) {
+      continue;
+    }
+    if (possible[subRow + inRow][subCol + inCol][value] == 1) {
+      output = 1;
+      possible[subRow + inRow][subCol + inCol][value] = 0;
+      possibleCount[subRow + inRow][subCol + inCol] -= 1;
+      if (verbosity > 0) {
+        printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+          valid[value + 1], subRow + inRow, subCol + inCol);
+      }
+    }
+  }
+  return output;
+}
+
+
+/* --- CHECKERS [BRUTE FORCE] --- */
+
+/** Checks if the value is valid (no duplicates) in the given row.
+ *
+ *  @param[in]  value The value to check the validity of
+ *  @param[in]  row   The row to check the validity within
+ *  @param[out] valid (Bool) 0: False, 1: True
+ */
+int valid_in_row(int value, int row) {
+  for (int col = 0; col < VALUES; col++) {
+    if (grid[row][col] == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/** Checks if the value is valid (no duplicates) in the given column.
+ *
+ *  @param[in]  value The value to check the validity of
+ *  @param[in]  col   The col to check the validity within
+ *  @param[out] valid (Bool) 0: False, 1: True
+ */
+int valid_in_col(int value, int col) {
+  for (int row = 0; row < VALUES; row++) {
+    if (grid[row][col] == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/** Checks if the value is valid (no duplicates) in the given box.
+ *
+ *  @param[in]  value     The value to check the validity of
+ *  @param[in]  row, col  A position in the box to check the validity within
+ *  @param[out] valid     (Bool) 0: False, 1: True
+ */
+int valid_in_box(int value, int row, int col) {
+  int subRow = SUB_SIZE * (row / SUB_SIZE);
+  int subCol = SUB_SIZE * (col / SUB_SIZE);
+  for (int pos = 0; pos < VALUES; pos++) {
+    if (grid[subRow + (pos / SUB_SIZE)][subCol + (pos % SUB_SIZE)]
+        == valid[value]) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/** Attempts to solve using a brute force mechanism.
+ *
+ *  @param[in]  curRow, curCol  The current position to be forced in
+ *  @param[in]  verbosity       The verbosity of the output (print or hide)
+ *  @param[out] status          0: Success, 1: Invalid state
+ */
+int brute_force_rec(int curRow, int curCol, int verbosity) {
+  if (verbosity == 2) {
+    printf(FOUND "Brute Force(%i, %i)\n", curRow, curCol);
+  }
+  int colSet = 0;
+  for (int row = curRow; row < VALUES; row++) {
+    for (int col = 0; col < VALUES; col++) {
+      if (colSet == 0) {
+        col = curCol;
+        colSet = 1;
+      }
+      if (grid[row][col] == valid[0]) {
+        int value = 0;
+        while (1) {
+          value += 1;
+          // Check if value is valid
+          if (value > VALUES) {
+            // Reset current value to '-' if all values failed (rollback)
+            grid[row][col] = valid[0];
+            return 1;
+          }
+          // If invalid for that position, then try with the next one
+          if (valid_in_row(value, row) != 0 || valid_in_col(value, col) != 0 ||
+              valid_in_box(value, row, col) != 0) {
+            continue;
+          }
+          if (verbosity == 2) {
+            printf(ADD "Forced: %i, %i, %i\n", row, col, value);
+          }
+          grid[row][col] = valid[value];
+          // Return if successful till the end, otherwise keep looping
+          if (brute_force_rec(row + (col + 1) / VALUES,
+                              (col + 1) % VALUES, verbosity) == 0) {
+            return 0;
+          }
+        }
+      }
+      else if (verbosity == 2) {
+        printf("\x1B[36m' \x1B[0mSkipped: %i, %i\n", row, col);
+      }
+    }
+  }
+  return 0; // End of brute force
+}
+
+/** Wrapper function to handle result of recursive brute force appropriately.
+ *
+ *  @param[in]  verbosity The verbosity of the output (print or hide)
+ */
+void brute_force(int verbosity) {
+  if (verbosity > 0) {
+    printf(PROCESS "Attempting brute force...\n");
+  }
+  if (brute_force_rec(0, 0, verbosity) == 1) {
+    printf("Brute Force failed.\n");
+  }
+}
+
+
+/* --- REMOVEUNDANCY REMOVERS --- */
+
+/** Returns the maximum of two integers.
+ *
+ *  @param[in]  a, b  The two integers to compare
+ *  @param[out] max   The bigger number from a and b
+ */
+int max(int a, int b) {
+  if (a >= b) {
+    return a;
+  } else {
+    return b;
+  }
+}
+
+/** Returns overlapping house where possible locations of a value lie in.
+ *
+ *  @param[in]  houseBM A bitmap for the house to consult
+ *  @param[out] focus   The relative position of the overlapping house or -1
+ */
+int focus_house(int houseBM[SUB_SIZE]) {
+  int focus = -1;
+  for (int i = 0; i < SUB_SIZE; i++) {
+    if (houseBM[i] == 1) {
+      if (focus != -1) { // Re-assignment means no focus
+        return -1;
+      }
+      focus = i;
+    }
+  }
+  return focus;
+}
+
+/** Find value in only overlapping house and remove from rest of other houses.
+ *  Aggregation of pointing groups and box line reduction techniques.
+ *
+ *  @param[in]  verbosity The verbosity of the output (print or hide)
+ *  @param[out] removed   (Bool) 0: False, 1: True
+ */
+int intersection_removal(int verbosity) {
+  int output = 0;
+  if (verbosity > 0) {
+    printf(PROCESS "Using pointing groups...\n");
+  }
+  // SUBGRID
+  int rowBM[SUB_SIZE];
+  int colBM[SUB_SIZE];
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      for (int value = 1; value <= VALUES; value++) {
+        memset(rowBM, 0, sizeof(rowBM));
+        memset(colBM, 0, sizeof(colBM));
+        for (int pos = 0; pos < VALUES; pos++) {
+          int curRow = subRow * SUB_SIZE + (pos / SUB_SIZE);
+          int curCol = subCol * SUB_SIZE + (pos % SUB_SIZE);
+          if (possible[curRow][curCol][value] == 1) {
+            rowBM[pos / SUB_SIZE] = 1;
+            colBM[pos % SUB_SIZE] = 1;
+          }
+        }
+        int focus = focus_house(rowBM);
+        if (focus != -1) { // Row Ommision by Box (specialize REMOVERS)
+          int printed = 0;
+          int curRow = subRow * SUB_SIZE + focus;
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same box but on the row
+            if (i / SUB_SIZE != subCol && possible[curRow][i][value] == 1) {
+              output = 1;
+              possible[curRow][i][value] = 0;
+              possibleCount[curRow][i] -= 1;
+              if (verbosity > 0) {
+                if (printed == 0) {
+                  printf(FOUND "Using pointing groups on %s to remove from"
+                    " the box's %ith row:\n", valid[value + 1], focus);
+                  printed = 1;
+                }
+                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                  valid[value + 1], curRow, i);
+              }
+            }
+          }
+        }
+        focus = focus_house(colBM);
+        if (focus != -1) { // Col Ommision by Box (specialize REMOVERS)
+          int printed = 0;
+          int curCol = subCol * SUB_SIZE + focus;
+          for (int i = 0; i < VALUES; i++) {
+            // Not the same box but on the col
+            if (i / SUB_SIZE != subRow && possible[i][curCol][value] == 1) {
+              output = 1;
+              possible[i][curCol][value] = 0;
+              possibleCount[i][curCol] -= 1;
+              if (verbosity > 0) {
+                if (printed == 0) {
+                  printf(FOUND "Using pointing groups on %s to remove from"
+                    " the box's %ith column:\n", valid[value + 1], focus);
+                  printed = 1;
+                }
+                printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                  valid[value + 1], i, curCol);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  if (verbosity > 0) {
+    printf(PROCESS "Using box line reduction...\n");
+  }
+  int houseBM[SUB_SIZE];
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    for (int value = 0; value < VALUES; value++) {
+      memset(houseBM, 0, sizeof(houseBM));
+      for (int col = 0; col < VALUES; col++) {
+        if (possible[row][col][value] == 1) {
+          houseBM[col / SUB_SIZE] = 1;
+        }
+      }
+      int focus = focus_house(houseBM); // Box for the row
+      if (focus != -1) { // Box Ommision by Row (specialize REMOVERS)
+        int printed = 0;
+        int subRow = (row / SUB_SIZE) * SUB_SIZE;
+        int subCol = focus * SUB_SIZE;
+        for (int pos = 0; pos < VALUES; pos++) {
+          // Not the same row but in the box
+          int curRow = subRow + pos / SUB_SIZE;
+          int curCol = subCol + pos % SUB_SIZE;
+          if (curRow != row && possible[curRow][curCol][value] == 1) {
+            output = 1;
+            possible[curRow][curCol][value] = 0;
+            possibleCount[curRow][curCol] -= 1;
+            if (verbosity > 0) {
+              if (printed == 0) {
+                printf(FOUND "Using box line reduction to remove %s from the"
+                  " box except its %ith row:\n", valid[value + 1], focus);
+                printed = 1;
+              }
+              printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                valid[value + 1], curRow, curCol);
+            }
+          }
+        }
+      }
+    }
+  }
+  // COLUMN
+  for (int col = 0; col < VALUES; col++) {
+    for (int value = 0; value < VALUES; value++) {
+      memset(houseBM, 0, sizeof(houseBM));
+      for (int row = 0; row < VALUES; row++) {
+        if (possible[row][col][value] == 1) {
+          houseBM[row / SUB_SIZE] = 1;
+        }
+      }
+      int focus = focus_house(houseBM); // Box for the row
+      if (focus != -1) { // Box Ommision by Row (specialize REMOVERS)
+        int printed = 0;
+        int subRow = focus * SUB_SIZE;
+        int subCol = (col / SUB_SIZE) * SUB_SIZE;
+        for (int pos = 0; pos < VALUES; pos++) {
+          // Not the same col but in the box
+          int curRow = subRow + pos / SUB_SIZE;
+          int curCol = subCol + pos % SUB_SIZE;
+          if (curCol != col && possible[curRow][curCol][value] == 1) {
+            output = 1;
+            possible[curRow][curCol][value] = 0;
+            possibleCount[curRow][curCol] -= 1;
+            if (verbosity > 0) {
+              if (printed == 0) {
+                printf(FOUND "Using box line reduction to remove %s from the"
+                  " box except its %ith column:\n", valid[value + 1], focus);
+                printed = 1;
+              }
+              printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+                valid[value + 1], curRow, curCol);
+            }
+          }
+        }
+      }
+    }
+  }
+  return output;
+}
+
+/** Removes values according to the contents of a known naked group.
+ *
+ *  @param[in]  rows, cols  The positions of the cells in the group
+ *  @param[in]  shared      The values shared by the group
+ *  @param[in]  size        The number of cells in the group
+ *  @param[in]  mode        The mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int remove_naked_group(int* rows, int* cols, int* shared, int size,
+                      int mode, int verbosity) {
+  int output = 0;
+  if (verbosity > 0) {
+    printf(FOUND "Found naked group (");
+    for (int i = 0; i < size - 1; i++) {
+      printf("%s, ", valid[shared[i] + 1]);
+    }
+    printf("%s) using %s at ", valid[shared[size - 1] + 1], MODE_LABELS[mode]);
+    for (int i = 0; i < size; i++) {
+      printf("(%i, %i) ", rows[i], cols[i]);
+    }
+    printf("\n");
+  }
+
+  int mask[VALUES];
+  memset(mask, 0, sizeof(mask));
+  switch (mode) {
+    case 0: { // ROW
+      // Apply mask to all columns
+      for (int i = 0; i < size; i++) {
+        mask[cols[i]] = 1;
+      }
+      for (int i = 0; i < size; i++) {
+        output = max(output,
+          remove_value_from_row(rows[i], shared[i], mask, verbosity));
+      }
+      break;
+    }
+    case 1: { // COL
+      // Apply mask to all rows
+      for (int i = 0; i < size; i++) {
+        mask[rows[i]] = 1;
+      }
+      for (int i = 0; i < size; i++) {
+        output = max(output,
+          remove_value_from_column(cols[i], shared[i], mask, verbosity));
+      }
+      break;
+    }
+    case 2: { // SUBGRID (same one)
+      // Apply mask to all positions
+      for (int i = 0; i < size; i++) {
+        mask[SUB_SIZE * (rows[i] % SUB_SIZE) + cols[i] % SUB_SIZE] = 1;
+      }
+      for (int i = 0; i < size; i++) {
+        output = max(output,
+          remove_value_from_box(rows[i], cols[i], shared[i], mask, verbosity));
+      }
+      break;
+    }
+    default: {
+      fprintf(stderr, "Invalid mode for removing naked group.");
+      exit(1);
+    }
+  }
+  return output;
+}
+
+/** Removes values according to the contents of a known hidden group.
+ *
+ *  @param[in]  rows, cols  The positions of the cells in the group
+ *  @param[in]  shared      The values shared by the group
+ *  @param[in]  size        The number of cells in the group
+ *  @param[in]  mode        The mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int remove_hidden_group(int* rows, int* cols, int* shared, int size,
+                      int mode, int verbosity) {
+  int output = 0;
+  if (verbosity > 0) {
+    printf(FOUND "Found hidden group (");
+    for (int i = 0; i < size - 1; i++) {
+      printf("%s, ", valid[shared[i] + 1]);
+    }
+    printf("%s) using %s at ", valid[shared[size - 1] + 1], MODE_LABELS[mode]);
+    for (int i = 0; i < size; i++) {
+      printf("(%i, %i) ", rows[i], cols[i]);
+    }
+    printf("\n");
+  }
+
+  // Use shared as mask
+  for (int pos = 0; pos < size; pos++) {
+    for (int value = 0; value < VALUES; value++) {
+      // Skip values in shared (use as mask)
+      int skip = 0;
+      for (int i = 0; i < size; i++) {
+        if (value == shared[i]) {
+          skip = 1;
+          break;
+        }
+      }
+      if (skip == 1) {
+        continue;
+      }
+      // Remove possibility from cells
+      if (possible[rows[pos]][cols[pos]][value] == 1) {
+        output = 1;
+        possible[rows[pos]][cols[pos]][value] = 0;
+        possibleCount[rows[pos]][cols[pos]] -= 1;
+        if (verbosity > 0) {
+          printf(REMOVE "Eliminated: %s at (%i, %i)\n",
+            valid[value + 1], rows[pos], cols[pos]);
+        }
+      }
+    }
+  }
+  return output;
+}
+
+/** Evaluates a naked group by checking validity and removing redundancy.
+ *
+ *  @param[in]  candidates  The positions of the cells within the house
+ *  @param[in]  size        The number of cells in the group
+ *  @param[in]  pos         Specifies the house, with mode specifying its type
+ *  @param[in]  mode        The mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int eval_naked_group(int* candidates, int size, int pos,
+    int mode, int verbosity) {
+  // Loop through candidates to obtain shared values
+  int preShared[VALUES];
+  memset(preShared, 0, sizeof(preShared));
+  switch (mode) {
+    case 0: { // ROW
+      for (int i = 0; i < size; i++) {
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[pos][candidates[i]][value] == 1) {
+            preShared[value] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 1: { // COL
+      for (int i = 0; i < size; i++) {
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[candidates[i]][pos][value] == 1) {
+            preShared[value] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 2: { // SUBGRID
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        int curRow = subRow + (candidates[i] / SUB_SIZE);
+        int curCol = subCol + (candidates[i] % SUB_SIZE);
+        for (int value = 0; value < VALUES; value++) {
+          if (possible[curRow][curCol][value] == 1) {
+            preShared[value] += 1;
+          }
+        }
+      }
+    }
+  }
+
+  // Determine if valid naked group and collect shared values
+  int shared[size];
+  memset(shared, 0, sizeof(shared));
+  int sharedCounter = 0;
+  for (int value = 0; value < VALUES; value++) {
+    if (preShared[value] > 0) {
+      if (sharedCounter == size) {
+        return 0; // Too many values to be a naked group
+      }
+      shared[sharedCounter] = value;
+      sharedCounter += 1;
+    }
+  }
+
+  int output = 0;
+  int rows[size];
+  int cols[size];
+  memset(rows, 0, sizeof(rows));
+  memset(cols, 0, sizeof(cols));
+  // Mode specific construction of rows and cols
+  switch (mode) {
+    case 0: { // Row
+      for (int i = 0; i < size; i++) { // All have same row
+        rows[i] = pos;
+        cols[i] = candidates[i];
+      }
+      break;
+    }
+    case 1: { // Col
+      for (int i = 0; i < size; i++) { // All have same col
+        rows[i] = candidates[i];
+        cols[i] = pos;
+      }
+      break;
+    }
+    case 2: { // Box
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        rows[i] = subRow + (candidates[i] / SUB_SIZE);
+        cols[i] = subCol + (candidates[i] % SUB_SIZE);
+      }
+      break;
+    }
+  }
+
+  output = max(output,
+    remove_naked_group(rows, cols, shared, size, mode, verbosity));
+
+  // Additional shared groups if any
+  int sharedValue = -1;
+  int sharesGroup = 1;
+  if (mode < 2) {
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = candidates[i] / SUB_SIZE;
+      } else if (sharedValue != candidates[i] / SUB_SIZE) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 2, verbosity));
+    }
+  } else {
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = rows[i];
+      } else if (sharedValue != rows[i]) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 0, verbosity));
+    }
+
+    sharedValue = -1;
+    sharesGroup = 1;
+    for (int i = 0; i < size; i++) {
+      if (sharedValue == -1) {
+        sharedValue = cols[i];
+      } else if (sharedValue != cols[i]) {
+        sharesGroup = 0;
+        break;
+      }
+    }
+    if (sharesGroup == 1) {
+      output = max(output,
+        remove_naked_group(rows, cols, shared, size, 1, verbosity));
+    }
+  }
+  return output;
+}
+
+/** Evaluates a hidden group by checking validity and removing redundancy.
+ *
+ *  @param[in]  candidates  The positions of the cells within the house
+ *  @param[in]  size        The number of cells in the group
+ *  @param[in]  pos         Specifies the house, with mode specifying its type
+ *  @param[in]  mode        The mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int eval_hidden_group(int* candidates, int size, int pos,
+    int mode, int verbosity) {
+  // Loop through candidates to obtain shared positions
+  int preShared[VALUES];
+  memset(preShared, 0, sizeof(preShared));
+  switch (mode) {
+    case 0: { // ROW
+      for (int i = 0; i < size; i++) { // value
+        for (int col = 0; col < VALUES; col++) {
+          if (possible[pos][col][candidates[i]] == 1) {
+            preShared[col] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 1: { // COL
+      for (int i = 0; i < size; i++) {
+        for (int row = 0; row < VALUES; row++) {
+          if (possible[row][pos][candidates[i]] == 1) {
+            preShared[row] += 1;
+          }
+        }
+      }
+      break;
+    }
+    case 2: { // SUBGRID
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        for (int inPos = 0; inPos < VALUES; inPos++) {
+          int curRow = subRow + (inPos / SUB_SIZE);
+          int curCol = subCol + (inPos % SUB_SIZE);
+          if (possible[curRow][curCol][candidates[i]] == 1) {
+            preShared[inPos] += 1;
+          }
+        }
+      }
+    }
+  }
+
+  // Determine if valid hidden group and collect shared positions
+  int shared[size];
+  memset(shared, 0, sizeof(shared));
+  int sharedCounter = 0;
+  for (int position = 0; position < VALUES; position++) {
+    if (preShared[position] > 0) {
+      if (sharedCounter == size) {
+        return 0; // Too many values to be a hidden group
+      }
+      shared[sharedCounter] = position;
+      sharedCounter += 1;
+    }
+  }
+
+  if (sharedCounter < size) {
+    return 0;
+  }
+
+  int rows[size];
+  int cols[size];
+  memset(rows, 0, sizeof(rows));
+  memset(cols, 0, sizeof(cols));
+  // Mode specific construction of rows and cols
+  switch (mode) {
+    case 0: { // Row
+      for (int i = 0; i < size; i++) { // All have same row
+        rows[i] = pos;
+        cols[i] = shared[i];
+      }
+      break;
+    }
+    case 1: { // Col
+      for (int i = 0; i < size; i++) { // All have same col
+        rows[i] = shared[i];
+        cols[i] = pos;
+      }
+      break;
+    }
+    case 2: { // Box
+      int subRow = (pos / SUB_SIZE) * SUB_SIZE;
+      int subCol = (pos % SUB_SIZE) * SUB_SIZE;
+      for (int i = 0; i < size; i++) {
+        rows[i] = subRow + (shared[i] / SUB_SIZE);
+        cols[i] = subCol + (shared[i] % SUB_SIZE);
+      }
+      break;
+    }
+  }
+
+  return remove_hidden_group(rows, cols, candidates, size, mode, verbosity);
+}
+
+/** Recursive function to create groups of candidate numbers of the given size.
+ *  These are used for both naked and hidden and evaluated when formed.
+ *  Optimized to exit early if not enough candidates left for forming a group.
+ *
+ *  @param[in]      considered    A bitmap of candidate cells in a house
+ *  @param[in]      curConsidered The current index within considered
+ *  @param[in]      candidCount   The number of candidates in considered
+ *  @param[in, out] candidates    The candidates currently in the group
+ *  @param[in]      curCandid     The position of the candidate in order
+ *  @param[in]      targetSize    The desired size of the candidate group
+ *  @param[in]      curSize       The current size of the candidate group
+ *  @param[in]      pos           Specifies the position of the house
+ *  @param[in]      mode          Mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]      verbosity     The verbosity of the output (print or hide)
+ *  @param[in]      isHidden      Whether the group is hidden or naked
+ *  @param[out]     removed       (Bool) 0: False, 1: True
+ */
+int candid_group(int considered[VALUES], int curConsidered, int candidCount,
+    int* candidates, int curCandid, int targetSize, int curSize,
+    int pos, int mode, int verbosity, int isHidden) {
+  // If the target group size is met, evaluate the group
+  if (curSize == targetSize) {
+    if (isHidden == 1) {
+      return eval_hidden_group(candidates, targetSize, pos, mode, verbosity);
+    } else {
+      return eval_naked_group(candidates, targetSize, pos, mode, verbosity);
+    }
+  }
+  // If not enough candidates left to form a group, then quit
+  if (candidCount - curCandid < targetSize - curSize) {
+    return 0;
+  }
+  // Use curConsidered and candidates to get next curConsidered
+  int output = 0;
+  int nextConsidered;
+  int nextCandid = curCandid;
+  do {
+    nextConsidered = -1;
+    for (int i = curConsidered + 1; i < VALUES; i++) {
+      if (considered[i] == 1) {
+        nextConsidered = i;
+        nextCandid += 1;
+        break;
+      }
+    }
+    // If valid index, then recurse further
+    if (nextConsidered != -1) {
+      candidates[curSize] = nextConsidered;
+      output = max(candid_group(considered, nextConsidered, candidCount,
+        candidates, nextCandid, targetSize, curSize + 1, pos, mode, verbosity,
+        isHidden), output);
+      // Update curConsidered to allow next value to be considered
+      curConsidered = nextConsidered;
+    }
+  } while (nextConsidered != -1);
+  return output;
+  // If invalid index, then return (candidates only used after full assignment)
+}
+
+/** Wrapper function for forming naked groups and evaluating them.
+ *
+ *  @param[in]      considered    A bitmap of candidate cells in a house
+ *  @param[in]      candidCount   The number of candidates in considered
+ *  @param[in]      size          The desired size of the candidate group
+ *  @param[in]      pos           Specifies the position of the house
+ *  @param[in]      mode          Mode of operation {0: row, 1: column, 2: box}
+ *  @param[in]      verbosity     The verbosity of the output (print or hide)
+ *  @param[in]      isHidden      Whether the group is hidden or naked
+ *  @param[out]     removed       (Bool) 0: False, 1: True
+ */
+int find_group(int considered[VALUES], int candidCount, int size, int pos,
+    int mode, int verbosity, int isHidden) {
+  int candidates[size];
+  memset(candidates, 0, sizeof(candidates));
+  return candid_group(considered, -1, candidCount, candidates, -1, size, 0,
+    pos, mode, verbosity, isHidden);
+}
+
+/** Top-level function to find and remove naked groups.
+ *  Loop through all houses and find cells containing same group of values,
+ *    and remove from these values from all other linked houses
+ *
+ *  @param[in]  size        The size of the naked groups to consider
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int naked_groups(int size, int verbosity) {
+  int output = 0;
+  if (verbosity > 0) {
+    printf(PROCESS "Finding naked groups of size %i...\n", size);
+  }
+
+  // Consider if two or more cells with possibleCount between 2 & size
+  int count = 0;
+  int considered[VALUES];
+
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    count = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int col = 0; col < VALUES; col++) {
+      if (possibleCount[row][col] >= 2 && possibleCount[row][col] <= size) {
+        count++;
+        considered[col] = 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked groups
+    if (count >= size) {
+      output = max(output,
+        find_group(considered, count, size, row, 0, verbosity, 0));
+    }
+  }
+  // COL
+  for (int col = 0; col < VALUES; col++) {
+    count = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int row = 0; row < VALUES; row++) {
+      if (possibleCount[row][col] >= 2 && possibleCount[row][col] <= size) {
+        count++;
+        considered[row] = 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked groups
+    if (count >= size) {
+      output = max(output,
+        find_group(considered, count, size, col, 1, verbosity, 0));
+    }
+  }
+  // SUBGRID
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      count = 0;
+      memset(considered, 0, sizeof(considered));
+      for (int pos = 0; pos < VALUES; pos++) {
+        int curRow = subRow * SUB_SIZE + pos / SUB_SIZE;
+        int curCol = subCol * SUB_SIZE + pos % SUB_SIZE;
+        int possibilities = possibleCount[curRow][curCol];
+        if (possibilities >= 2 && possibilities <= size) {
+          count++;
+          considered[pos] = 1;
+        }
+      }
+      // If we consider enough cells, begin to find naked groups
+      if (count >= size) {
+        output = max(find_group(considered, count, size,
+          (subRow * SUB_SIZE) + subCol, 2, verbosity, 0), output);
+      }
+    }
+  }
+  return output;
+}
+
+/** Top-level function to find and remove hidden groups.
+ *  Loop through all houses and find 2 cells with pair that only appear there,
+ *    and remove all the other values from those cells
+ *
+ *  @param[in]  size        The size of the naked groups to consider
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int hidden_groups(int size, int verbosity) {
+  int output = 0;
+  if (verbosity > 0) {
+    printf(PROCESS "Finding hidden groups of size %i...\n", size);
+  }
+
+  // Consider if two or more values appearing between 2 & size
+  int valueFrequency = 0;
+  int consideredCount = 0;
+  int considered[VALUES];
+
+  // ROW
+  for (int row = 0; row < VALUES; row++) {
+    consideredCount = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int value = 0; value < VALUES; value++) {
+      valueFrequency = 0;
+      for (int col = 0; col < VALUES; col++) {
+        if (possible[row][col][value] == 1) {
+          valueFrequency++;
+        }
+      }
+      if (valueFrequency >= 2 && valueFrequency <= size) {
+        considered[value] = 1;
+        consideredCount += 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked groups
+    if (valueFrequency >= size) {
+      output = max(output,
+        find_group(considered, valueFrequency, size, row, 0, verbosity, 1));
+    }
+  }
+  // COL
+  for (int col = 0; col < VALUES; col++) {
+    consideredCount = 0;
+    memset(considered, 0, sizeof(considered));
+    for (int value = 0; value < VALUES; value++) {
+      valueFrequency = 0;
+      for (int row = 0; row < VALUES; row++) {
+        if (possible[row][col][value] == 1) {
+          valueFrequency++;
+        }
+      }
+      if (valueFrequency >= 2 && valueFrequency <= size) {
+        considered[value] = 1;
+        consideredCount += 1;
+      }
+    }
+    // If we consider enough cells, begin to find naked groups
+    if (valueFrequency >= size) {
+      output = max(output,
+        find_group(considered, valueFrequency, size, col, 1, verbosity, 1));
+    }
+  }
+  // SUBGRID
+  for (int subRow = 0; subRow < SUB_SIZE; subRow++) {
+    for (int subCol = 0; subCol < SUB_SIZE; subCol++) {
+      consideredCount = 0;
+      memset(considered, 0, sizeof(considered));
+      for (int value = 0; value < VALUES; value++) {
+        valueFrequency = 0;
+        for (int pos = 0; pos < VALUES; pos++) {
+          int curRow = subRow * SUB_SIZE + pos / SUB_SIZE;
+          int curCol = subCol * SUB_SIZE + pos % SUB_SIZE;
+          if (possible[curRow][curCol][value] == 1) {
+            valueFrequency++;
+          }
+        }
+        if (valueFrequency >= 2 && valueFrequency <= size) {
+          considered[value] = 1;
+          consideredCount += 1;
+        }
+      }
+      // If we consider enough cells, begin to find naked groups
+      if (valueFrequency >= size) {
+        output = max(find_group(considered, valueFrequency, size,
+          (subRow * SUB_SIZE) + subCol, 2, verbosity, 1), output);
+      }
+    }
+  }
+  return output;
+}
+
+/** Elminates redundant possibilities using the techniques the solver knows.
+ *  Adopts an incremental strategy to use more advanced techniques only if no
+ *    progress is made by the previous strategies, for greedy addition.
+ *
+ *  @param[in]  verbosity   The verbosity of the output (print or hide)
+ *  @param[out] removed     (Bool) 0: False, 1: True
+ */
+int eliminate_redundant(int verbosity) {
+  int output = 0;
+  int step = 0;
+  if (verbosity > 0) {
+    printf(PROCESS "Removing redundant values...\n");
+  }
+  while (output == 0 && step < 3) {
+    switch (step) {
+      case 0: {
+        for (int size = 2; size <= 4; size++) {
+          output = max(output, naked_groups(size, verbosity));
+        }
+        break;
+      }
+      case 1: {
+        for (int size = 2; size <= 4; size++) {
+          output = max(output, hidden_groups(size, verbosity));
+        }
+        break;
+      }
+      case 2: {
+        output = max(output, intersection_removal(verbosity));
+        break;
+      }
+    }
+    step += 1;
+  }
+  return output;
+}
+
+
+/* --- PROCESS LOOP --- */
+
+/** Process the next iteration of the loop.
+ *
+ *  @param[in, out] cellsLeft The number of cells left to solve the sudoku
+ *  @param[in]      verbosity The verbosity of the output (print or hide)
+ *  @param[in]      forceFlag How much brute force we can apply
+ *  @param[out]     status    0: Success, 1: Failure (Stalemate)
+ */
+int process_next(int* cellsLeft, int verbosity, int forceFlag) {
+  if (*cellsLeft == 0) {
+    return 1;
+  }
+  int value = -1;
+  int* pair = find_single(); // Find cell with only one left
+  if (pair == NULL) { // If not found, try other methods
+    for (int mode = 0; mode < 3; mode++) { // Loop through row, col, box
+      if ((pair = unique_in_range(mode, &value, verbosity)) != NULL) {
+        break; // If found, stop checking
+      }
+    }
+    if (pair == NULL) { // If there still is no pair found, remove redundancy
+      // If nothing was eliminated (stalemate), then brute force or fail
+      if (eliminate_redundant(verbosity) == 1) {
+        return 0;
+      } else {
+        if (verbosity > 0 && forceFlag == -1) {
+          fprintf(stderr, "Didn't find next pair. Cells left: %i\n",
+            *cellsLeft);
+        }
+        if (forceFlag != -1) { // If brute force not disabled, use it to finish
+          brute_force(verbosity);
+        }
+        return 1;
+      }
+    }
+  }
+  // Only for find_single, since unique in range sets appropriate value
+  if (value == -1) {
+    value = get_possible_value(pair);
+    if (verbosity > 0 && value != -1) {
+      printf(ADD "Added %s at (%i, %i) as single possibility\n",
+        valid[value + 1], pair[0], pair[1]);
+    }
+  }
+  if (value == -1) {
+    fprintf(stderr, "Empty cell processed\n");
+    return 1;
+  }
+
+  grid[pair[0]][pair[1]] = valid[value + 1];
+  // Clear filled cell of all possibilities
+  for (int val = 0; val < VALUES; val++) {
+    possible[pair[0]][pair[1]][val] = 0;
+  }
+  possibleCount[pair[0]][pair[1]] = 0;
+  *cellsLeft -= 1;
+
+  int mask[VALUES];
+  memset(mask, 0, sizeof(mask));
+  mask[pair[1]] = 1;
+  remove_value_from_row(pair[0], value, mask, 0);
+  mask[pair[1]] = 0;
+  mask[pair[0]] = 1;
+  remove_value_from_column(pair[1], value, mask, 0);
+  mask[pair[0]] = 0;
+  remove_value_from_box(pair[0], pair[1], value, mask, 0);
+
+  free(pair);
+  return 0;
+}
+
+
+/* --- EXPORTERS --- */
+
+/** Writes the contents of the grid to a file in csv format.
+ *
+ *  @param[in]  output  The file to write the output to
+ */
 void write_to_file(FILE* output) {
   char buffer[ROW_BUF_SIZE];
   for (int row = 0; row < VALUES; row++) {
@@ -771,7 +1836,11 @@ void write_to_file(FILE* output) {
   }
 }
 
-// Exports the solved grid as a csv file
+/** Exports the solved grid as a csv file.
+ *
+ *  @param[in]  outCsv  The path (and name) of the file to output to
+ *  @param[out] status  0: Success, 1: Failure
+ */
 int export_grid(char* outCsv) {
   // Append .csv file extension to the fileName provided if not already present
   char* outCsvFull = calloc(strlen(outCsv) + 4, sizeof(char));
@@ -793,9 +1862,13 @@ int export_grid(char* outCsv) {
   return 0;
 }
 
-// Reads, solves and checks all sudokus in a bulk sudoku file with the initial
-// and solution grid stored as VALUES^2 character strings (so it is dependant on
-// single character value tokens)
+
+/** Reads, solves and checks all sudokus in a bulk sudoku file.
+ *  This is dependant on single character value tokens as opposed to strings.
+ *
+ *  @param[in]  fileName  The path of the file to read from
+ *  @param[out] status    -1: Invalid pre-global, 0: Success, 1: Failure
+ */
 int read_bulk(const char* fileName, int forceFlag) {
   FILE* input = fopen(fileName, "r");
   if (input == NULL) {
@@ -901,7 +1974,14 @@ int read_bulk(const char* fileName, int forceFlag) {
   return 0;
 }
 
-// Adapter function to handle the reading of a file appropriate to its structure
+/** Adapter function to handle the reading of a file depending on its structure.
+ *
+ *  @param[in]  inCsv     The input CSV file to read from
+ *  @param[in]  missing   The missing token to use (if required)
+ *  @param[in]  bulkFlag  Whether we are evaluating a bulk file
+ *  @param[in]  forceFlag How much brute force we can apply
+ *  @param[out] status    -1: Invalid pre-global, 0: Success, 1: Failure
+ */
 int read_file(char* inCsv, char* missing, int isBulk, int forceFlag) {
   if (isBulk) {
     return read_bulk(inCsv, forceFlag);
@@ -910,6 +1990,12 @@ int read_file(char* inCsv, char* missing, int isBulk, int forceFlag) {
   }
 }
 
+
+/** Called initially and encompasses the program's functionality.
+ *
+ *  @param[in]  argc  The number of command line arguments
+ *  @param[in]  argv  The command line arguments
+ */
 int main(int argc, char* argv[]) {
   // Read and store arguments in easy to use manner
   clock_t time;
@@ -920,10 +2006,11 @@ int main(int argc, char* argv[]) {
   int bulkFlag = 0; // [0, 1]
   int timeFlag = 0; // [0, 1]
   int forceFlag = 0; // [-1, 0, 1]
-  if (process_arguments(argc, argv, &verbosity, &bulkFlag,
-      &timeFlag, &forceFlag, &inCsv, &outCsv, &missing) != 0) {
+  int debugFlag = 0; // [0, 1]
+  if (process_arguments(argc, argv, &verbosity, &bulkFlag, &timeFlag,
+      &forceFlag, &debugFlag, &inCsv, &outCsv, &missing) != 0) {
     fprintf(stderr, "\nUsage: ./sudoku.out [[-v]|[-vv]] [-b] [-t] [[-f]|[-nf]]"
-                    "[-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
+                    " [-d] [-o <new_csv_name>] [-m <missing_arg>] <csv_path>\n"
                     "\nOptions:\n"
                     " -v verbose output, lists steps in solving\n"
                     " -vv extra verbose output, lists brute force steps\n"
@@ -931,8 +2018,9 @@ int main(int argc, char* argv[]) {
                     " -t shows the benchmarked time for reading and execution\n"
                     " -f uses brute force for solving immediately\n"
                     " -nf disables use of brute force\n"
+                    " -d debug mode, shows all possibilities for each cell\n"
                     " -o exports solved grid to a new csv\n"
-                    " -m provide missing argument if not in the grid");
+                    " -m provide missing argument if not in the grid\n");
     return 1;
   }
 
@@ -976,6 +2064,9 @@ int main(int argc, char* argv[]) {
   // Display solution
   printf("\nOutput:");
   print_grid();
+  if (debugFlag == 1) {
+    print_possible();
+  }
   if (outCsv != NULL) { // If output set, export
     if (export_grid(outCsv) != 0) {
       free_globals();
