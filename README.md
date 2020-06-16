@@ -50,3 +50,5 @@ Additional features include visualising the input and output sudoku grid in a si
 ASCII format on the terminal, the option to write this output to another CSV file using the `-o`
 flag, and the ability to define a missing value that the sudoku puzzle may hold but the initial grid
 skips out on (this defaults to "X", but `-m` may be specifed to set this value).
+
+Documentation may be seen online at: https://henit3.github.io/sudoku-solver/
